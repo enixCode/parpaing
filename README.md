@@ -31,15 +31,24 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Run a command | `POST /sandboxes/:id/exec` | Live output, then the exit code | 🟢 Done |
 | Info | `GET /info` | Version, engines, capacity, sandbox count | 🟢 Done |
 | OpenAPI | `GET /openapi.json` | The API description, generated from the code | 🟢 Done |
-| Stop a command | `POST /sandboxes/:id/exec/:execId/stop` | Stops it and what it started | ⚪ Planned |
 | Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Save a folder, restore it | ⚪ Planned |
-| API key | `Authorization: Bearer <key>` | Required on every call | ⚪ Planned |
-| Limits | `POST /sandboxes` + `memory`, `cpus`, `pids` | Caps per sandbox | ⚪ Planned |
+| API key | `Authorization: Bearer <key>` | Optional, with `PARPAING_API_KEY` | 🟢 Done |
+| Limits | `POST /sandboxes` + `memory`, `cpus`, `processes`, `disk` | Caps per sandbox | ⚪ Planned |
 | Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor) | ⚪ Planned |
 
 🟢 Done: works today, can still change before 1.0.0. 🟡 In progress: being built. ⚪ Planned: not started.
 
-See the details in [ROADMAP.md](ROADMAP.md). Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
+See the details in [ROADMAP.md](ROADMAP.md).
+
+## Isolation
+
+| Engine | What it is | For | Status |
+|---|---|---|---|
+| runc | Docker's default: the sandbox shares the host's kernel | Dev, pre-prod | 🟢 Done |
+| runsc (gVisor) | A kernel in Go between the sandbox and the host, on any Linux server, no KVM needed | Prod | ⚪ Planned |
+| Kata Containers | A small virtual machine per sandbox, needs KVM | To plan | ⚪ Planned |
+
+Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 
 ## How it works
 
