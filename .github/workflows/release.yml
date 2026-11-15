@@ -1,0 +1,66 @@
+# Release: on a version tag, push both images to GHCR for linux/amd64 and linux/arm64.
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: ghcr.io/enixcode/parpaing
+            file: Dockerfile
+          - image: ghcr.io/enixcode/parpaing-gateway
+            file: gateway/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches package.json and compose.yml
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          # Once compose.yml pulls from ghcr.io, every image it pulls must be this version.
+          while read -r ref; do
+            if [ "${ref##*:}" != "$version" ]; then
+              echo "::error::compose.yml pulls $ref, expected version $version"
+              exit 1
+            fi
+          done < <(grep -o "ghcr.io/enixcode/[a-z-]*:[^\" ]*" compose.yml || true)
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ matrix.image }}
+          # latest is added by default for semver tags.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

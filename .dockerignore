@@ -1,0 +1,7 @@
+# Only what the two images need goes to the Docker build.
+*
+!package.json
+!package-lock.json
+!src
+!gateway
+!docs/brand
