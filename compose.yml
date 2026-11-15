@@ -11,6 +11,13 @@ services:
     environment:
       # Optional: when set, every API call needs Authorization: Bearer <key>.
       - PARPAING_API_KEY
+      # Optional: default ceilings per sandbox (memory and disk in MB): 1024, 1, 1024, 10240.
+      - PARPAING_MEMORY
+      - PARPAING_CPUS
+      - PARPAING_PROCESSES
+      - PARPAING_DISK
+      # Optional: free memory kept for the machine, in MB (512): under it, no new sandbox.
+      - PARPAING_RESERVED_MEMORY
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
 

@@ -35,6 +35,8 @@ async function newSandbox() {
 }
 
 const lines = (text: string) => text.trim().split("\n").map((line) => JSON.parse(line));
+// The whole stdout of a command, whatever chunks it came in.
+const stdout = (text: string) => lines(text).filter((line) => line.stream === "stdout").map((line) => line.data).join("");
 const exec = (id: string, cmd: unknown) => api("POST", `/sandboxes/${id}/exec`, { cmd });
 
 after(async () => {
@@ -50,7 +52,7 @@ describe("sandboxes", () => {
     const { id } = res.data;
     created.push(id);
 
-    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running" });
+    assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
     assert.ok((await api("GET", "/sandboxes")).data.some((sandbox: { id: string }) => sandbox.id === id));
     assert.equal((await api("DELETE", `/sandboxes/${id}`)).status, 204);
     assert.equal((await api("GET", `/sandboxes/${id}`)).status, 404);
@@ -77,6 +79,72 @@ describe("sandboxes", () => {
       assert.equal(res.status, 404);
       assert.deepEqual(res.data, { error: "unknown sandbox" });
     }
+  });
+});
+
+describe("limits", () => {
+  test("a new sandbox gets the default ceilings", async () => {
+    const res = await api("POST", "/sandboxes", {});
+    assert.equal(res.status, 201);
+    created.push(res.data.id);
+    assert.deepEqual(
+      { memory: res.data.memory, cpus: res.data.cpus, processes: res.data.processes, disk: res.data.disk },
+      { memory: 1024, cpus: 1, processes: 1024, disk: 10240 },
+    );
+  });
+
+  test("asked ceilings are applied by the kernel and readable inside", async () => {
+    const res = await api("POST", "/sandboxes", { memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
+    assert.equal(res.status, 201);
+    const { id } = res.data;
+    created.push(id);
+    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
+    const inside = await exec(id, ["sh", "-c", "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/pids.max; env | grep ^PARPAING_ | sort"]);
+    assert.deepEqual(stdout(inside.text).trim().split("\n"), [
+      String(256 * 1024 * 1024),
+      "50000 100000",
+      "100",
+      "PARPAING_CPUS=0.5",
+      "PARPAING_DISK_MB=2048",
+      "PARPAING_MEMORY_MB=256",
+      "PARPAING_PROCESSES=100",
+    ]);
+  });
+
+  test("past its memory, a process of the sandbox is killed and the sandbox lives on", async () => {
+    const res = await api("POST", "/sandboxes", { memory: 64 });
+    const { id } = res.data;
+    created.push(id);
+    // tail keeps the last lines of an endless input without newlines: its memory grows until the kernel stops it.
+    const run = await exec(id, ["sh", "-c", "tail /dev/zero"]);
+    assert.deepEqual(lines(run.text).at(-1), { exitCode: 137 });
+    assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
+  });
+
+  test("refuses limits that are not numbers in range, with an example", async () => {
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ memory: 0 }, /^memory: /],
+      [{ memory: 1.5 }, /^memory: /],
+      [{ memory: "1g" }, /^memory: /],
+      [{ cpus: 0 }, /^cpus: /],
+      [{ processes: 4 }, /^processes: /],
+      [{ disk: 0 }, /^disk: /],
+      [{ wait: 301 }, /^wait: /],
+    ];
+    for (const [body, error] of cases) {
+      const res = await api("POST", "/sandboxes", body);
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.match(res.data.error, error);
+    }
+  });
+
+  test("refuses more than the machine has", async () => {
+    const memory = await api("POST", "/sandboxes", { memory: 100_000_000 });
+    assert.equal(memory.status, 400);
+    assert.match(memory.data.error, /^memory: at most \d+ MB on this machine$/);
+    const cpus = await api("POST", "/sandboxes", { cpus: 10_000 });
+    assert.equal(cpus.status, 400);
+    assert.match(cpus.data.error, /^cpus: at most \d+ on this machine$/);
   });
 });
 
@@ -121,7 +189,7 @@ describe("commands", () => {
   test("root keeps only the 9 capabilities parpaing grants, for good", async () => {
     // CHOWN, DAC_OVERRIDE, FOWNER, FSETID, KILL, SETGID, SETUID, NET_BIND_SERVICE, AUDIT_WRITE = 0x200004fb. CapBnd is the cap nothing can exceed.
     const res = await exec(await newSandbox(), ["sh", "-c", "grep -E '^Cap(Eff|Bnd):' /proc/self/status"]);
-    const status = Object.fromEntries(lines(res.text)[0].data.trim().split("\n").map((line: string) => line.split(/:\s+/)));
+    const status = Object.fromEntries(stdout(res.text).trim().split("\n").map((line: string) => line.split(/:\s+/)));
     assert.deepEqual(status, { CapEff: "00000000200004fb", CapBnd: "00000000200004fb" });
   });
 
@@ -159,6 +227,7 @@ test("info: version, engines, capacity, sandbox count", async () => {
   assert.ok(data.engines.includes("runc"));
   assert.ok(data.cpus > 0 && data.memory > 0);
   assert.ok(data.sandboxes.running <= data.sandboxes.total);
+  assert.ok(data.memoryAvailable > 0 && data.memoryReserved === 512 * 1024 * 1024);
 });
 
 describe("API reference", () => {

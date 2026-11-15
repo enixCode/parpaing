@@ -1,4 +1,4 @@
-# CI: type check, build both images with compose, then run the API tests (tests/) without an API key, then with one.
+# CI: type check, build both images with compose, then run the API tests (tests/) without an API key, with one, and on a full machine.
 name: ci
 
 on:
@@ -45,6 +45,12 @@ jobs:
         run: npm test
         env:
           PARPAING_API_KEY: ci-key
+
+      - name: Test a machine without free memory
+        run: |
+          PARPAING_RESERVED_MEMORY=99999999 docker compose up -d parpaing
+          timeout 60 sh -c "until curl -fsS $API/info >/dev/null; do sleep 2; done"
+          PARPAING_TEST_SATURATED=1 node --test tests/saturated.test.ts
 
       - name: Logs
         if: failure()
