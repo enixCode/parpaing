@@ -56,11 +56,12 @@
   <text x="168" y="140" class="lbl">direct, optional</text>
 
   <!-- The gateway (nginx): the only port -->
-  <rect x="292" y="214" width="200" height="88" rx="10" class="ext"/>
-  <text x="392" y="238" text-anchor="middle" class="h">gateway, port 8090</text>
-  <text x="392" y="258" text-anchor="middle" class="code">/: the web page</text>
-  <text x="392" y="274" text-anchor="middle" class="code">/brand/: the brand kit</text>
-  <text x="392" y="290" text-anchor="middle" class="code">the rest: the API</text>
+  <rect x="292" y="214" width="200" height="98" rx="10" class="ext"/>
+  <text x="392" y="236" text-anchor="middle" class="h">gateway, port 8090</text>
+  <text x="392" y="254" text-anchor="middle" class="code">/: the web page</text>
+  <text x="392" y="268" text-anchor="middle" class="code">/docs: the API reference</text>
+  <text x="392" y="282" text-anchor="middle" class="code">/brand/: the brand kit</text>
+  <text x="392" y="296" text-anchor="middle" class="code">the rest: the API</text>
   <path d="M392,214 L392,186" class="http"/>
   <text x="400" y="204" class="lbl">relays the API</text>
 

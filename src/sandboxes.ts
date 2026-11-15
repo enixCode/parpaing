@@ -45,7 +45,7 @@ export async function create(image = IMAGE) {
   return { id: shortId(container.id), state: "running" };
 }
 
-const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+export const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 // The engines are the runtimes Docker offers (runc, and runsc once gVisor is installed).
 export async function info() {

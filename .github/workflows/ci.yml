@@ -34,6 +34,10 @@ jobs:
           echo "$out" | tail -n 1 | jq -e '.exitCode == 0'
           echo "$out" | jq -e -s 'any(.[]; .stream == "stdout" and (.data | contains("ok")))'
           test "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$API/sandboxes/$id")" = 204
+          # The API reference: the description lists the routes, the page and Scalar load.
+          curl -fsS "$API/openapi.json" | jq -e '.paths["/sandboxes/{id}/exec"].post'
+          curl -fsS "$API/docs" | grep -q 'id="api-reference"'
+          curl -fsS -o /dev/null "$API/docs/scalar.js"
 
       - name: Logs
         if: failure()

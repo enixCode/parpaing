@@ -9,8 +9,10 @@
   "type": "module",
   "dependencies": {
     "@hono/node-server": "^2.1.8",
+    "@hono/zod-openapi": "^1.6.3",
     "dockerode": "^5.0.1",
-    "hono": "^4.13.18"
+    "hono": "^4.13.18",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/dockerode": "^4.0.2",

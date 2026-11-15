@@ -46,6 +46,7 @@
   a { color: inherit; text-underline-offset: 3px; }
   :focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
 
+  header .docs { margin-left: auto; }
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 24px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
   h1 img { display: block; width: auto; height: 28px; }
   .lede { color: var(--muted); }
@@ -206,6 +207,7 @@
 <header>
     <h1><picture><source media="(prefers-color-scheme: light)" srcset="/brand/logo-wordmark-light.svg"><img src="/brand/logo-wordmark-dark.svg" alt="parpaing"></picture></h1>
   <p class="lede">Self-hosted Docker sandboxes for AI agents. Create one, pick it, run commands in it.</p>
+  <a class="docs" href="/docs">API reference</a>
 </header>
 
 <div class="shell">
