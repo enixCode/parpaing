@@ -20,7 +20,7 @@ Each sandbox runs with an engine (an OCI runtime). parpaing must work with the t
 | Hardening (9 capabilities) | ✅ | ❓ | ❓ | Both apply Docker's capabilities (gVisor, Kata agent). ping without NET_RAW relies on a kernel setting gVisor may not copy |
 | Memory and CPU limits | ✅ | ❓ | ❓ | Kata: the limits apply inside the virtual machine, which costs ~150 to 300 MB more |
 | Process limit | ✅ | ❓ | ❓ | runsc: the host limit also counts gVisor's own threads; the host stays protected, the sandbox may crash |
-| Back after a restart | ❓ | ❓ | ❓ | |
+| Back after a restart | ✅ | ❓ | ❓ | Docker restarts the sandbox on every engine. runsc: files written outside volumes live in gVisor's overlay and are probably lost |
 | Network isolation, egress proxy | ❓ | ❓ | ❓ | gVisor has its own network stack |
 | Stop a command | ❓ | ❓ | ❓ | Stops the command and everything it started |
 | Archives | ❓ | ❓ | ❓ | runsc: do Docker's archive calls see files written inside gVisor? Kata: the files live in the virtual machine |
