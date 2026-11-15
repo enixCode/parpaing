@@ -1,4 +1,4 @@
-# CI: build both images with compose, then run the API tests (tests/) without an API key, then with one.
+# CI: type check, build both images with compose, then run the API tests (tests/) without an API key, then with one.
 name: ci
 
 on:
@@ -21,6 +21,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26
+
+      - name: Type check
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run typecheck
 
       - name: Build and start
         run: docker compose up -d --build

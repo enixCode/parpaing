@@ -5,7 +5,8 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc"
   },
   "type": "module",
   "dependencies": {
@@ -17,6 +18,7 @@
   },
   "devDependencies": {
     "@types/dockerode": "^4.0.2",
-    "@types/node": "^26.6.6"
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   }
 }
