@@ -10,6 +10,7 @@ const CPUS_HELP = "cpus: a number of CPUs from 0.01, for example 2 or 0.5";
 const PROCESSES_HELP = "processes: a whole number from 16, for example 1024";
 const DISK_HELP = "disk: megabytes, a whole number from 1, for example 20480";
 const WAIT_HELP = "wait: seconds to wait for free memory, a whole number from 0 to 300";
+const PATH_HELP = "path: an absolute folder path, for example /root/project";
 
 const Problem = z.object({ error: z.string() }).openapi("Error");
 const Id = z.string().regex(/^[0-9a-f]{12}$/).openapi({ example: "3f9a2c7d1e4b" });
@@ -36,6 +37,7 @@ const NewSandbox = z.object({
   disk: whole(DISK_HELP, 1).optional().openapi({ description: "Megabytes, 10240 by default (PARPAING_DISK)", example: 20480 }),
   wait: whole(WAIT_HELP, 0).max(300, { error: WAIT_HELP }).optional().openapi({ description: "Seconds to wait if the machine lacks free memory, 0 by default", example: 30 }),
 });
+const Folder = z.object({ path: z.string({ error: PATH_HELP }).startsWith("/", { error: PATH_HELP }).openapi({ example: "/root/project" }) });
 const Command = z.object({ cmd: z.array(z.string({ error: CMD_HELP }), { error: CMD_HELP }).min(1, { error: CMD_HELP }).openapi({ example: ["ls", "-la"] }) });
 const Info = z
   .object({
@@ -61,6 +63,8 @@ const json = <T extends z.ZodType>(schema: T, description: string) => ({ descrip
 const body = <T extends z.ZodType>(schema: T) => ({ body: { required: true, content: { "application/json": { schema } } } });
 const NOT_FOUND = json(Problem, "Unknown sandbox");
 const NOT_JSON = json(Problem, "The body is not labelled application/json");
+const STOPPED = json(Problem, "The sandbox is stopped");
+const TAR = { "application/x-tar": { schema: z.string().openapi({ format: "binary" }) } };
 
 export const createSandbox = createRoute({
   method: "post",
@@ -117,8 +121,40 @@ export const runCommand = createRoute({
     200: { description: "One ExecLine per line, the last one holds the exit code", content: { "application/x-ndjson": { schema: ExecLine } } },
     400: json(Problem, "No command"),
     404: NOT_FOUND,
-    409: json(Problem, "The sandbox is stopped"),
+    409: STOPPED,
     415: NOT_JSON,
+  },
+});
+
+export const readArchive = createRoute({
+  method: "get",
+  path: "/sandboxes/{id}/archive",
+  summary: "Download a folder",
+  tags: ["Files"],
+  description:
+    "Streams the folder's content as a tar archive, made by tar inside the sandbox: the image needs tar (Debian, Ubuntu, Alpine, Node and Python images have it). If tar fails midway, the transfer breaks instead of ending with a cut archive.",
+  request: { params: Params, query: Folder },
+  responses: {
+    200: { description: "The folder's content as a tar archive", content: TAR },
+    400: json(Problem, "No absolute path, or an image without tar"),
+    404: json(Problem, "Unknown sandbox, or no such folder"),
+    409: STOPPED,
+  },
+});
+
+export const writeArchive = createRoute({
+  method: "put",
+  path: "/sandboxes/{id}/archive",
+  summary: "Upload a folder",
+  tags: ["Files"],
+  description:
+    "Unpacks a tar archive into the folder, created if missing. Files in the archive replace those of the same name; other files stay. An archive from GET restores the folder.",
+  request: { params: Params, query: Folder, body: { required: true, content: TAR } },
+  responses: {
+    204: { description: "Unpacked" },
+    400: json(Problem, "No absolute path, not a tar archive, or an image without tar"),
+    404: NOT_FOUND,
+    409: STOPPED,
   },
 });
 
@@ -141,6 +177,7 @@ export const document = (version: string) => ({
   tags: [
     { name: "Sandboxes", description: "Create, list, read and delete sandboxes" },
     { name: "Commands", description: "Run commands in a sandbox" },
+    { name: "Files", description: "Copy folders out of and into a sandbox" },
     { name: "Machine", description: "What this machine offers" },
   ],
   info: { title: "parpaing", version, description: "Self-hosted sandboxes for AI agents, driven by an HTTP API." },

@@ -1,10 +1,12 @@
 // parpaing: the HTTP API for sandboxes and their commands, on port 8090 behind the nginx gateway (gateway/). This file answers
-// the routes declared in routes.ts (what each one accepts and answers); Docker lives in sandboxes.ts and exec.ts.
+// the routes declared in routes.ts (what each one accepts and answers); Docker lives in sandboxes.ts, exec.ts and archive.ts.
+import { Readable } from "node:stream";
 import { serve } from "@hono/node-server";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
+import { readFolder, writeFolder } from "./archive.ts";
 import { startCommand } from "./exec.ts";
 import * as routes from "./routes.ts";
 import { UNKNOWN } from "./routes.ts";
@@ -57,10 +59,8 @@ app.openapi(routes.deleteSandbox, async (c) => ((await sandboxes.remove(c.req.va
 // Runs a command and streams its output live: one JSON line per chunk, then its exit code.
 // Refusals (400, 404, 409) come before any line; a client that leaves does not stop it.
 app.openapi(routes.runCommand, async (c) => {
-  const found = await sandboxes.find(c.req.valid("param").id);
-  if (!found) return c.json(UNKNOWN, 404);
-  if (!found.running) return c.json({ error: "sandbox stopped" }, 409);
-  const follow = await startCommand(found.container, c.req.valid("json").cmd);
+  const container = await sandboxes.running(c.req.valid("param").id);
+  const follow = await startCommand(container, c.req.valid("json").cmd);
 
   c.header("content-type", "application/x-ndjson");
   const line = (value: unknown) => JSON.stringify(value) + "\n";
@@ -74,6 +74,20 @@ app.openapi(routes.runCommand, async (c) => {
     },
     async (error, out) => void (await out.write(line({ error: error.message }))),
   ) as never;
+});
+
+// A folder out as a tar stream, or a tar stream unpacked into a folder. Refusals come before the first byte.
+app.openapi(routes.readArchive, async (c) => {
+  const container = await sandboxes.running(c.req.valid("param").id);
+  const archive = await readFolder(container, c.req.valid("query").path);
+  // A tar stream, not the JSON zod-openapi expects: the same cast as the exec stream.
+  return c.body(Readable.toWeb(archive) as ReadableStream, 200, { "content-type": "application/x-tar" }) as never;
+});
+
+app.openapi(routes.writeArchive, async (c) => {
+  const container = await sandboxes.running(c.req.valid("param").id);
+  await writeFolder(container, c.req.valid("query").path, c.req.raw.body ?? new Blob().stream());
+  return c.body(null, 204);
 });
 
 // What this machine offers: version, engines, capacity, sandbox count. A central server uses it to place sandboxes.

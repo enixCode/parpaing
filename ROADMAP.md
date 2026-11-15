@@ -35,7 +35,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 16 | Network isolation | No local network, no other sandboxes | < 1.0.0 | ⚪ Planned |
 | 17 | Egress proxy | Internet only through a proxy | < 1.0.0 | ⚪ Planned |
 | 18 | Result in one answer | The whole output and the exit code in one JSON | < 1.0.0 | ⚪ Planned |
-| 19 | Archives | `GET` and `PUT /sandboxes/:id/archive?path=`: save or restore a folder as a tar. To verify on runsc and Kata first | < 1.0.0 | ⚪ Planned |
+| 19 | Archives | `GET` and `PUT /sandboxes/:id/archive?path=`: a folder out as a tar, a tar back into a folder, made by the sandbox's own `tar` so it works the same on every engine | < 1.0.0 | 🟢 Done |
 | | **🚀 Release 1.0.0** | The API is frozen: from here on, breaking changes only come with a new major | 1.0.0 | ⚪ Planned |
 | 20 | Labels | Key-value pairs on a sandbox, and filter the list by label | 1.x | ⚪ Planned |
 | 21 | Time to live | Removed after a set time, fixed at creation | 1.x | ⚪ Planned |

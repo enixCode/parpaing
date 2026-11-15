@@ -36,7 +36,7 @@ function memoryAvailable() {
   return found ? Number(found[1]) * 1024 : Infinity;
 }
 
-const clientError = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
+export const clientError = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
 // A limit cannot exceed the machine. Under the reserve of free memory, a new sandbox waits, checked every second
 // for up to `wait` seconds, then is refused.
@@ -140,6 +140,14 @@ export async function find(id: string) {
   });
   if (info?.Config.Labels?.[LABEL] === undefined) return undefined;
   return { container, running: info.State.Running, info };
+}
+
+// The container of a running sandbox, for a command or an archive. Refused otherwise.
+export async function running(id: string) {
+  const found = await find(id);
+  if (!found) throw clientError("unknown sandbox", 404);
+  if (!found.running) throw clientError("sandbox stopped", 409);
+  return found.container;
 }
 
 // A sandbox created before limits existed has none: null.
