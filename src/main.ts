@@ -77,7 +77,7 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/sandboxes",
-    summary: "Create a sandbox",
+    summary: "Create a sandbox", tags: ["Sandboxes"],
     description: "Starts a container from the image, debian:trixie-slim when none is given. A missing image is downloaded first.",
     request: body(z.object({ image: z.string({ error: IMAGE_HELP }).min(1, { error: IMAGE_HELP }).optional().openapi({ example: "debian:trixie-slim" }) })),
     responses: { 201: json(Sandbox, "The sandbox, running"), 400: json(Problem, "An image name Docker cannot use"), 415: NOT_JSON },
@@ -86,12 +86,12 @@ app.openapi(
 );
 
 app.openapi(
-  createRoute({ method: "get", path: "/sandboxes", summary: "List the sandboxes", responses: { 200: json(z.array(Sandbox), "Every sandbox, running or stopped") } }),
+  createRoute({ method: "get", path: "/sandboxes", summary: "List the sandboxes", tags: ["Sandboxes"], responses: { 200: json(z.array(Sandbox), "Every sandbox, running or stopped") } }),
   async (c) => c.json(await list(), 200),
 );
 
 app.openapi(
-  createRoute({ method: "get", path: "/sandboxes/{id}", summary: "Get a sandbox", request: { params: Params }, responses: { 200: json(Sandbox, "The sandbox"), 404: NOT_FOUND } }),
+  createRoute({ method: "get", path: "/sandboxes/{id}", summary: "Get a sandbox", tags: ["Sandboxes"], request: { params: Params }, responses: { 200: json(Sandbox, "The sandbox"), 404: NOT_FOUND } }),
   async (c) => {
     const sandbox = await get(c.req.valid("param").id);
     return sandbox ? c.json(sandbox, 200) : c.json(UNKNOWN, 404);
@@ -102,7 +102,7 @@ app.openapi(
   createRoute({
     method: "delete",
     path: "/sandboxes/{id}",
-    summary: "Delete a sandbox",
+    summary: "Delete a sandbox", tags: ["Sandboxes"],
     description: "Removes the container and everything in it.",
     request: { params: Params },
     responses: { 204: { description: "Deleted" }, 404: NOT_FOUND },
@@ -116,7 +116,7 @@ app.openapi(
   createRoute({
     method: "post",
     path: "/sandboxes/{id}/exec",
-    summary: "Run a command",
+    summary: "Run a command", tags: ["Commands"],
     description: "Streams the output live, one JSON object per line: stdout and stderr chunks as they come, then the exit code. A failure after the start ends the stream with an error line.",
     request: { params: Params, ...body(z.object({ cmd: z.array(z.string({ error: CMD_HELP }), { error: CMD_HELP }).min(1, { error: CMD_HELP }).openapi({ example: ["ls", "-la"] }) })) },
     responses: {
@@ -149,12 +149,18 @@ app.openapi(
 // What this machine offers: version, engines, capacity, sandbox count. A central server uses it to
 // place sandboxes.
 app.openapi(
-  createRoute({ method: "get", path: "/info", summary: "What this machine offers", responses: { 200: json(Info, "Version, engines, capacity, sandbox count") } }),
+  createRoute({ method: "get", path: "/info", summary: "What this machine offers", tags: ["Machine"], responses: { 200: json(Info, "Version, engines, capacity, sandbox count") } }),
   async (c) => c.json(await info(), 200),
 );
 
-// The server address makes the curl examples of /docs ready to paste.
-app.doc31("/openapi.json", { openapi: "3.1.0", servers: [{ url: "http://127.0.0.1:8090" }], security: [{ apiKey: [] }, {}], info: { title: "parpaing", version: VERSION, description: "Self-hosted sandboxes for AI agents, driven by an HTTP API." } });
+// Scalar shows one folder per tag. The server is the address /docs was opened from: its curl examples and Test Request follow it (127.0.0.1, localhost, a host name).
+app.doc31("/openapi.json", { openapi: "3.1.0", servers: [{ url: "/" }], security: [{ apiKey: [] }, {}],
+  tags: [
+    { name: "Sandboxes", description: "Create, list, read and delete sandboxes" },
+    { name: "Commands", description: "Run commands in a sandbox" },
+    { name: "Machine", description: "What this machine offers" },
+  ],
+  info: { title: "parpaing", version: VERSION, description: "Self-hosted sandboxes for AI agents, driven by an HTTP API." } });
 
 app.notFound((c) => c.json({ error: "unknown route" }, 404));
 
@@ -171,5 +177,5 @@ app.onError((error, c) => {
 // parpaing listens on every address of its container, otherwise Docker cannot forward the port to it.
 // compose decides who can reach it: 127.0.0.1 by default, PARPAING_ADDRESS for the network.
 serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 8090 }, () =>
-  console.log(`parpaing: sandbox API on http://127.0.0.1:8090, ${KEY ? "API key required" : "no API key (PARPAING_API_KEY): open to anyone who reaches the port"}`),
+  console.log(`parpaing: sandbox API on port 8090, ${KEY ? "API key required" : "no API key (PARPAING_API_KEY): open to anyone who reaches the port"}`),
 );
