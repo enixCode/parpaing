@@ -4,7 +4,8 @@
   "description": "Self-hosted sandboxes for AI agents, driven by an HTTP API.",
   "license": "AGPL-3.0-only",
   "scripts": {
-    "start": "node src/main.ts"
+    "start": "node src/main.ts",
+    "test": "node --test tests/*.test.ts"
   },
   "type": "module",
   "dependencies": {
