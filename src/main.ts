@@ -138,7 +138,8 @@ app.openapi(
   async (c) => c.json(await info(), 200),
 );
 
-app.doc31("/openapi.json", { openapi: "3.1.0", info: { title: "parpaing", version: VERSION, description: "Self-hosted sandboxes for AI agents, driven by an HTTP API." } });
+// The server address makes the curl examples of /docs ready to paste.
+app.doc31("/openapi.json", { openapi: "3.1.0", servers: [{ url: "http://127.0.0.1:8090" }], info: { title: "parpaing", version: VERSION, description: "Self-hosted sandboxes for AI agents, driven by an HTTP API." } });
 
 app.notFound((c) => c.json({ error: "unknown route" }, 404));
 
