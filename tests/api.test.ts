@@ -202,6 +202,63 @@ describe("commands", () => {
   });
 });
 
+describe("archives", () => {
+  const auth: Record<string, string> = KEY ? { authorization: `Bearer ${KEY}` } : {};
+  const download = (id: string, path: string) => fetch(`${BASE}/sandboxes/${id}/archive?path=${path}`, { headers: auth });
+  const upload = (id: string, path: string, body: BodyInit) =>
+    fetch(`${BASE}/sandboxes/${id}/archive?path=${path}`, { method: "PUT", headers: { ...auth, "content-type": "application/x-tar" }, body });
+
+  test("a folder goes out as a tar and comes back in another folder", async () => {
+    const id = await newSandbox();
+    await exec(id, ["sh", "-c", "mkdir -p /data/sub && echo hello > /data/a.txt && echo deep > /data/sub/b.txt"]);
+    const out = await download(id, "/data");
+    assert.equal(out.status, 200);
+    assert.equal(out.headers.get("content-type"), "application/x-tar");
+    const tar = await out.arrayBuffer();
+    assert.equal(Buffer.from(tar).toString("latin1", 257, 262), "ustar");
+    assert.equal((await upload(id, "/copy/here", tar)).status, 204);
+    assert.equal(stdout((await exec(id, ["cat", "/copy/here/a.txt", "/copy/here/sub/b.txt"])).text), "hello\ndeep\n");
+  });
+
+  test("a big folder streams out and in whole", async () => {
+    const id = await newSandbox();
+    await exec(id, ["sh", "-c", "mkdir /big && head -c 30000000 /dev/urandom > /big/blob"]);
+    const tar = await (await download(id, "/big")).arrayBuffer();
+    assert.ok(tar.byteLength > 30000000);
+    assert.equal((await upload(id, "/big2", tar)).status, 204);
+    const sums = stdout((await exec(id, ["sh", "-c", "sha256sum < /big/blob; sha256sum < /big2/blob"])).text).split("\n");
+    assert.equal(sums[0], sums[1]);
+  });
+
+  test("refuses a missing folder, a relative path and what is not an archive", async () => {
+    const id = await newSandbox();
+    const missing = await download(id, "/nope");
+    assert.equal(missing.status, 404);
+    assert.deepEqual(await missing.json(), { error: "no folder /nope in this sandbox" });
+    for (const path of ["relative", ""]) {
+      const res = await download(id, path);
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: "path: an absolute folder path, for example /root/project" });
+    }
+    const garbage = await upload(id, "/x", "not a tar archive, just text long enough to fill a block ".repeat(20));
+    assert.equal(garbage.status, 400);
+    assert.match((await garbage.json()).error, /tar archive/);
+  });
+
+  test("an image without tar says so", async () => {
+    const id = await newSandbox();
+    await exec(id, ["sh", "-c", 'rm "$(command -v tar)"']);
+    const res = await download(id, "/root");
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "this image has no tar: archives need it in the sandbox" });
+  });
+
+  test("refuses an unknown sandbox", async () => {
+    assert.equal((await download("0123456789ab", "/root")).status, 404);
+    assert.equal((await upload("0123456789ab", "/root", "x")).status, 404);
+  });
+});
+
 describe("requests", () => {
   test("a POST body must be labelled JSON", async () => {
     const res = await api("POST", "/sandboxes", "{}", { "content-type": "text/plain" });
@@ -235,7 +292,7 @@ describe("API reference", () => {
     const res = await fetch(`${BASE}/openapi.json`);
     const spec = await res.json();
     assert.deepEqual(spec.servers, [{ url: "/" }]);
-    assert.deepEqual(Object.keys(spec.paths).sort(), ["/info", "/sandboxes", "/sandboxes/{id}", "/sandboxes/{id}/exec"]);
+    assert.deepEqual(Object.keys(spec.paths).sort(), ["/info", "/sandboxes", "/sandboxes/{id}", "/sandboxes/{id}/archive", "/sandboxes/{id}/exec"]);
   });
 
   test("/docs loads Scalar under the strict CSP", async () => {

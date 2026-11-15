@@ -3,7 +3,7 @@ import { Writable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { StringDecoder } from "node:string_decoder";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Container } from "dockerode";
+import type { Container, Exec } from "dockerode";
 
 export type Output = "stdout" | "stderr";
 
@@ -29,12 +29,16 @@ export async function startCommand(container: Container, cmd: string[]) {
     };
     container.modem.demuxStream(output, sink("stdout"), sink("stderr"));
     await finished(output, { writable: false });
-    // The stream can close just before Docker records the end of the command.
-    let info = await exec.inspect();
-    while (info.Running) {
-      await sleep(10);
-      info = await exec.inspect();
-    }
-    return info.ExitCode as number;
+    return exitCode(exec);
   };
+}
+
+// The exit code of a finished command. Its output can close just before Docker records the end.
+export async function exitCode(exec: Exec) {
+  let info = await exec.inspect();
+  while (info.Running) {
+    await sleep(10);
+    info = await exec.inspect();
+  }
+  return info.ExitCode as number;
 }
