@@ -47,6 +47,7 @@
   :focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
 
   header .docs { margin-left: auto; }
+  header #api-key { width: 180px; }
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 24px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
   h1 img { display: block; width: auto; height: 28px; }
   .lede { color: var(--muted); }
@@ -208,6 +209,7 @@
     <h1><picture><source media="(prefers-color-scheme: light)" srcset="/brand/logo-wordmark-light.svg"><img src="/brand/logo-wordmark-dark.svg" alt="parpaing"></picture></h1>
   <p class="lede">Self-hosted Docker sandboxes for AI agents. Create one, pick it, run commands in it.</p>
   <a class="docs" href="/docs">API reference</a>
+  <input id="api-key" type="password" placeholder="API key" aria-label="API key" autocomplete="off" hidden>
 </header>
 
 <div class="shell">
@@ -249,7 +251,7 @@
       </form>
     </section>
 
-    <p id="coming-next">Coming next: stop a command, save and restore folders, an API key, limits per sandbox, internet through a proxy. <a href="https://github.com/enixCode/parpaing/blob/main/ROADMAP.md">Roadmap</a></p>
+    <p id="coming-next">Coming next: stop a command, save and restore folders, limits per sandbox, internet through a proxy. <a href="https://github.com/enixCode/parpaing/blob/main/ROADMAP.md">Roadmap</a></p>
   </main>
 
   <aside id="log-drawer" aria-labelledby="log-title" hidden>

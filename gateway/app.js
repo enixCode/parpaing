@@ -3,6 +3,22 @@ const $ = (id) => document.getElementById(id);
 const BASE = location.origin;
 $("status-api").textContent = BASE;
 
+// The API key, only when this parpaing asks for one (PARPAING_API_KEY): the field shows up on the first 401,
+// the key stays in this browser and goes with every call.
+const keyField = $("api-key");
+try { keyField.value = localStorage.getItem("parpaing-api-key") ?? ""; } catch {}
+keyField.hidden = !keyField.value;
+keyField.onchange = () => {
+  try { localStorage.setItem("parpaing-api-key", keyField.value.trim()); } catch {}
+  refresh();
+};
+const authorize = (headers) => (keyField.value.trim() ? { ...headers, authorization: `Bearer ${keyField.value.trim()}` } : headers);
+function askKey(status) {
+  if (status !== 401) return;
+  keyField.hidden = false;
+  keyField.focus();
+}
+
 // Aglo, the mascot: shows a drawing of the brand kit (docs/brand/aglo), served by nginx at /brand.
 // A new URL for the error reloads the file, so its fall plays again.
 function aglo(slot, pose) {
@@ -41,7 +57,7 @@ function summary(method, path, status, ms) {
 
 // Sends the request, then adds it to the top of the drawer with its curl equivalent and its response.
 async function call(method, path, body) {
-  const options = { method, headers: body ? { "content-type": "application/json" } : {} };
+  const options = { method, headers: authorize(body ? { "content-type": "application/json" } : {}) };
   if (body) options.body = JSON.stringify(body);
   $("status-last").replaceChildren(...summary(method, path));
   const started = performance.now();
@@ -49,6 +65,7 @@ async function call(method, path, body) {
   try {
     const res = await fetch(path, options);
     status = res.status;
+    askKey(status);
     text = await res.text();
   } catch (error) {
     text = `parpaing is not responding (${error.message}). Is it running with docker compose up -d?`;
@@ -63,7 +80,7 @@ async function call(method, path, body) {
 let calls = 0;
 function log(method, path, body, status, data, ms) {
   // -N: curl prints each line as soon as it arrives, without waiting for the end.
-  const curl = `curl ${path.endsWith("/exec") ? "-N " : ""}-X ${method} ${BASE}${path}` + (body ? ` -H 'content-type: application/json' -d '${JSON.stringify(body).replaceAll("'", "'\\''")}'` : "");
+  const curl = `curl ${path.endsWith("/exec") ? "-N " : ""}-X ${method} ${BASE}${path}` + (keyField.value.trim() ? ' -H "authorization: Bearer $PARPAING_API_KEY"' : "") + (body ? ` -H 'content-type: application/json' -d '${JSON.stringify(body).replaceAll("'", "'\\''")}'` : "");
   const shown = data === undefined ? "(no body)" : typeof data === "string" ? data : JSON.stringify(data, null, 2);
   const entry = document.createElement("li");
   entry.className = "call";
@@ -225,8 +242,9 @@ $("exec").onsubmit = async (event) => {
   const started = performance.now();
   let status = 0, raw = "", failed = false;
   try {
-    const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const res = await fetch(path, { method: "POST", headers: authorize({ "content-type": "application/json" }), body: JSON.stringify(body) });
     status = res.status;
+    askKey(status);
     if (!res.ok) {
       raw = await res.text();
       print(raw, "stderr");

@@ -21,7 +21,7 @@ The page creates sandboxes and runs commands in them; each action shows the requ
 
 The API reference is at <http://127.0.0.1:8090/docs>.
 
-Until the API key lands, keep that server behind a firewall or a VPN.
+Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. Without it, anyone who reaches the port can use the API.
 
 ## API
 

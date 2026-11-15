@@ -8,6 +8,9 @@ services:
     restart: unless-stopped
     # ports: 
     #   - "${PARPAING_ADDRESS:-127.0.0.1}:8090:8090"
+    environment:
+      # Optional: when set, every API call needs Authorization: Bearer <key>.
+      - PARPAING_API_KEY
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
 
