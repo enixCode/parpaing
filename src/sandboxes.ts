@@ -89,6 +89,8 @@ export async function create({ image = IMAGE, wait = 0, ...asked }: { image?: st
       PidsLimit: limits.processes,
       // If the whole machine runs out of memory, the kernel kills sandbox processes first, not parpaing or Docker.
       OomScoreAdj: 500,
+      // Back after a restart of the machine or of Docker, with its files but without the processes it ran.
+      RestartPolicy: { Name: "unless-stopped" },
     },
   };
   const container = await docker.createContainer(options).catch(async (error) => {

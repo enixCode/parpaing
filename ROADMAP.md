@@ -31,7 +31,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 12 | API key | Optional: with `PARPAING_API_KEY`, `Authorization: Bearer <key>` on every call | < 1.0.0 | 🟢 Done |
 | 13 | Hardening | Root in the sandbox (apt, pip work), with only 9 capabilities: nothing gets the others back | < 1.0.0 | 🟢 Done |
 | 14 | Limits | Memory, CPU and processes per sandbox: ceilings, not reservations. A new sandbox is refused (or waits) when the machine lacks free memory | < 1.0.0 | 🟢 Done |
-| 15 | Back after a restart | Sandboxes start again with the machine | < 1.0.0 | ⚪ Planned |
+| 15 | Back after a restart | Sandboxes start again with the machine, with their files but not their processes | < 1.0.0 | 🟢 Done |
 | 16 | Network isolation | No local network, no other sandboxes | < 1.0.0 | ⚪ Planned |
 | 17 | Egress proxy | Internet only through a proxy | < 1.0.0 | ⚪ Planned |
 | 18 | Result in one answer | The whole output and the exit code in one JSON | < 1.0.0 | ⚪ Planned |
