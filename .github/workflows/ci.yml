@@ -1,4 +1,4 @@
-# CI: build both images with compose, then smoke-test the sandbox API through the page.
+# CI: build both images with compose, then run the API tests (tests/) without an API key, then with one.
 name: ci
 
 on:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -18,26 +18,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
       - name: Build and start
         run: docker compose up -d --build
 
       - name: Wait for the API
         run: timeout 60 sh -c "until curl -fsS $API/info; do sleep 2; done"
 
-      - name: Smoke test
+      - name: Test without an API key
+        run: npm test
+
+      - name: Restart with an API key
         run: |
-          id=$(curl -fsS -X POST -H 'content-type: application/json' -d '{}' "$API/sandboxes" | jq -r .id)
-          [[ $id =~ ^[0-9a-f]{12}$ ]]
-          out=$(curl -fsS -X POST -H 'content-type: application/json' -d '{"cmd":["sh","-c","echo ok"]}' "$API/sandboxes/$id/exec")
-          echo "$out"
-          # The stream must end with exit code 0 and contain "ok" on stdout.
-          echo "$out" | tail -n 1 | jq -e '.exitCode == 0'
-          echo "$out" | jq -e -s 'any(.[]; .stream == "stdout" and (.data | contains("ok")))'
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$API/sandboxes/$id")" = 204
-          # The API reference: the description lists the routes, the page and Scalar load.
-          curl -fsS "$API/openapi.json" | jq -e '.paths["/sandboxes/{id}/exec"].post'
-          curl -fsS "$API/docs" | grep -q 'id="api-reference"'
-          curl -fsS -o /dev/null "$API/docs/scalar.js"
+          PARPAING_API_KEY=ci-key docker compose up -d parpaing
+          timeout 60 sh -c 'until curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/info | grep -qx 401; do sleep 2; done'
+
+      - name: Test with an API key
+        run: npm test
+        env:
+          PARPAING_API_KEY: ci-key
 
       - name: Logs
         if: failure()
