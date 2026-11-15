@@ -135,6 +135,8 @@ app.openapi(
 
     c.header("content-type", "application/x-ndjson");
     const line = (value: unknown) => JSON.stringify(value) + "\n";
+    // zod-openapi expects a typed JSON answer for any content type with "json" in it, x-ndjson included;
+    // the stream is a plain Response, described by ExecLine above, hence the cast.
     return stream(
       c,
       async (out) => {
@@ -142,7 +144,7 @@ app.openapi(
         await out.write(line({ exitCode }));
       },
       async (error, out) => void (await out.write(line({ error: error.message }))),
-    );
+    ) as never;
   },
 );
 

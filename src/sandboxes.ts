@@ -8,7 +8,7 @@ const LABEL = "parpaing.sandbox";
 // Image used when the request does not name one.
 const IMAGE = "debian:trixie-slim";
 
-const stateOf = (running: boolean) => (running ? "running" : "stopped");
+const stateOf = (running: boolean): "running" | "stopped" => (running ? "running" : "stopped");
 // A sandbox id is the start of its container's Docker id: 12 hex characters.
 const shortId = (id: string) => id.slice(0, 12);
 
@@ -42,7 +42,7 @@ export async function create(image = IMAGE) {
     await container.remove({ force: true });
     throw error.statusCode === 400 ? imageError(image, error) : error;
   });
-  return { id: shortId(container.id), state: "running" };
+  return { id: shortId(container.id), state: stateOf(true) };
 }
 
 export const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
