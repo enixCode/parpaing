@@ -19,6 +19,8 @@ Human digest API demo at <http://127.0.0.1:8090>. The API answers on the same po
 
 The page creates sandboxes and runs commands in them; each action shows the request, the answer and the matching `curl` command.
 
+The API reference is at <http://127.0.0.1:8090/docs>.
+
 Until the API key lands, keep that server behind a firewall or a VPN.
 
 ## API
@@ -28,6 +30,7 @@ Until the API key lands, keep that server behind a firewall or a VPN.
 | Sandboxes (CRUD) | `POST /sandboxes`<br>`GET /sandboxes`<br>`GET /sandboxes/:id`<br>`DELETE /sandboxes/:id` | Create, list, read, remove | 🟢 Done |
 | Run a command | `POST /sandboxes/:id/exec` | Live output, then the exit code | 🟢 Done |
 | Info | `GET /info` | Version, engines, capacity, sandbox count | 🟢 Done |
+| OpenAPI | `GET /openapi.json` | The API description, generated from the code | 🟢 Done |
 | Stop a command | `POST /sandboxes/:id/exec/:execId/stop` | Stops it and what it started | ⚪ Planned |
 | Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Save a folder, restore it | ⚪ Planned |
 | API key | `Authorization: Bearer <key>` | Required on every call | ⚪ Planned |

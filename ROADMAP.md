@@ -27,7 +27,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 8 | runc | Docker's default engine | < 1.0.0 | 🟢 Done |
 | 9 | One command | `docker compose up -d` | < 1.0.0 | 🟢 Done |
 | 10 | Web page | Try the API at `http://127.0.0.1:8090`, with the `curl` of each request (nginx serves it and relays the API on the same port) | < 1.0.0 | 🟢 Done |
-| 11 | API reference | OpenAPI and a `/docs` page | < 1.0.0 | ⚪ Planned |
+| 11 | API reference | OpenAPI at `/openapi.json`, generated from the code, and a `/docs` page | < 1.0.0 | 🟢 Done |
 | 12 | API key | `Authorization: Bearer <key>` on every call | < 1.0.0 | ⚪ Planned |
 | 13 | Hardening | Dropped capabilities, no privilege escalation, non-root user | < 1.0.0 | ⚪ Planned |
 | 14 | Limits | Memory, CPU and processes, per sandbox | < 1.0.0 | ⚪ Planned |
