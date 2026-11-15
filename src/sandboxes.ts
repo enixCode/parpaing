@@ -7,6 +7,11 @@ const docker = new Docker();
 const LABEL = "parpaing.sandbox";
 // Image used when the request does not name one.
 const IMAGE = "debian:trixie-slim";
+// The agent is root in its sandbox, so apt and pip work, but root keeps only these powers: files, users, its own
+// processes, ports below 1024, audit messages (sudo writes one). Every other capability is dropped and nothing gets it back, sudo included.
+// no-new-privileges is not set: it would break sudo in images that start as a non-root user, and the cap above
+// already bounds every process.
+const CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "SETGID", "SETUID", "NET_BIND_SERVICE", "AUDIT_WRITE"];
 
 const stateOf = (running: boolean): "running" | "stopped" => (running ? "running" : "stopped");
 // A sandbox id is the start of its container's Docker id: 12 hex characters.
@@ -28,7 +33,12 @@ const imageError = (image: string, error: Error) =>
 
 export async function create(image = IMAGE) {
   // sleep infinity does nothing and never ends: the container stays on.
-  const options = { Image: image, Entrypoint: ["sleep", "infinity"], Labels: { [LABEL]: "" } };
+  const options = {
+    Image: image,
+    Entrypoint: ["sleep", "infinity"],
+    Labels: { [LABEL]: "" },
+    HostConfig: { CapDrop: ["ALL"], CapAdd: CAPABILITIES },
+  };
   const container = await docker.createContainer(options).catch(async (error) => {
     if (error.statusCode === 400) throw imageError(image, error);
     if (error.statusCode !== 404) throw error;

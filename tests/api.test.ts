@@ -118,6 +118,13 @@ describe("commands", () => {
     }
   });
 
+  test("root keeps only the 9 capabilities parpaing grants, for good", async () => {
+    // CHOWN, DAC_OVERRIDE, FOWNER, FSETID, KILL, SETGID, SETUID, NET_BIND_SERVICE, AUDIT_WRITE = 0x200004fb. CapBnd is the cap nothing can exceed.
+    const res = await exec(await newSandbox(), ["sh", "-c", "grep -E '^Cap(Eff|Bnd):' /proc/self/status"]);
+    const status = Object.fromEntries(lines(res.text)[0].data.trim().split("\n").map((line: string) => line.split(/:\s+/)));
+    assert.deepEqual(status, { CapEff: "00000000200004fb", CapBnd: "00000000200004fb" });
+  });
+
   test("refuses an unknown sandbox", async () => {
     for (const id of ["000000000000", "nothex"]) {
       const res = await exec(id, ["true"]);
