@@ -9,8 +9,7 @@
 ## Quick start
 
 ```sh
-git clone https://github.com/enixCode/parpaing
-cd parpaing
+curl -O https://raw.githubusercontent.com/enixCode/parpaing/main/compose.yml
 docker compose up -d
 ```
 
