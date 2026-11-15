@@ -31,7 +31,7 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Run a command | `POST /sandboxes/:id/exec` | Live output, then the exit code | 🟢 Done |
 | Info | `GET /info` | Version, engines, capacity, sandbox count | 🟢 Done |
 | OpenAPI | `GET /openapi.json` | The API description, generated from the code | 🟢 Done |
-| Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Save a folder, restore it | ⚪ Planned |
+| Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back. The image needs `tar` | 🟢 Done |
 | API key | `Authorization: Bearer <key>` | Optional, with `PARPAING_API_KEY` | 🟢 Done |
 | Limits | `POST /sandboxes` + `memory`, `cpus`, `processes`, `disk`, `wait` | Ceilings per sandbox, readable inside with `env`. Disk: enforced on gVisor only | 🟢 Done |
 | Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor) | ⚪ Planned |
@@ -50,10 +50,22 @@ See the details in [ROADMAP.md](ROADMAP.md).
 
 Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 
+## Next: the sandbox daemon
+
+A small program inside each sandbox, brought by parpaing, not by the image. It is the base of:
+
+- **Sessions**: a shell that keeps its folder and variables, background commands.
+- **Command id**: each command gets an id.
+- **Stop a command**: by its id, with everything it started.
+- **File API**: read, write and list files with WebDAV (Explorer, Finder, rclone).
+- **Interactive terminal**: live keyboard, resizable.
+
+Planned for 1.x, see the [roadmap](ROADMAP.md).
+
 ## How it works
 
 - **A sandbox is a Docker container** labelled `parpaing.sandbox`. Parpaing never touches other containers.
-- **Always on**: the container runs `sleep infinity` and waits for commands.
+- **Always on**: the container runs `sleep infinity` and waits for commands. It starts again with Docker, with its files but not its processes.
 - **No state in Parpaing**: Docker keeps everything.
 - **One port**: the `gateway` container (nginx) serves the web page and the brand kit, and relays the API. The `parpaing` container also works alone, without the page.
 
