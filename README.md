@@ -4,6 +4,8 @@
 
 **parpaing** (French for *cinder block*): self-hosted sandboxes for AI agents, driven by an HTTP API. Your own machine, only Docker.
 
+Website: <https://parpaing.dev>
+
 > **Early stage.** parpaing is not stable yet: the API will change until 1.0.0. The changes will land over the coming weeks, to reach 1.0.0 quickly. See the [roadmap](ROADMAP.md).
 
 ## Quick start
