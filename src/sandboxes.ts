@@ -1,6 +1,7 @@
 // Sandboxes: one Docker container each, recognized by its parpaing.sandbox label. Docker keeps
 // everything, this file holds no state.
 import { readFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import Docker from "dockerode";
 
 const docker = new Docker();
@@ -12,6 +13,42 @@ const IMAGE = "debian:trixie-slim";
 // no-new-privileges is not set: it would break sudo in images that start as a non-root user, and the cap above
 // already bounds every process.
 const CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "SETGID", "SETUID", "NET_BIND_SERVICE", "AUDIT_WRITE"];
+
+// Limits are ceilings, not reservations: a sandbox only uses what it consumes, so a small server holds many.
+// Defaults come from compose (PARPAING_*), a request can ask for others. Memory and disk in MB.
+export type Limits = { memory: number; cpus: number; processes: number; disk: number };
+const setting = (name: string, fallback: number) => Number(process.env[name] ?? fallback);
+const DEFAULTS: Limits = {
+  memory: setting("PARPAING_MEMORY", 1024),
+  cpus: setting("PARPAING_CPUS", 1),
+  processes: setting("PARPAING_PROCESSES", 1024),
+  disk: setting("PARPAING_DISK", 10240),
+};
+// Free memory kept for the system, Docker and parpaing: under it, no new sandbox.
+const RESERVED = setting("PARPAING_RESERVED_MEMORY", 512);
+const MB = 1024 * 1024;
+// The disk limit is recorded on every engine; runc cannot enforce it without host setup, runsc will with its own size.
+const DISK_LABEL = "parpaing.disk";
+
+// The machine's free memory. parpaing's own container has no memory limit, so /proc/meminfo shows the host's.
+function memoryAvailable() {
+  const found = readFileSync("/proc/meminfo", "utf8").match(/^MemAvailable:\s+(\d+) kB/m);
+  return found ? Number(found[1]) * 1024 : Infinity;
+}
+
+const clientError = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
+
+// A limit cannot exceed the machine. Under the reserve of free memory, a new sandbox waits, checked every second
+// for up to `wait` seconds, then is refused.
+async function fits(limits: Limits, wait: number) {
+  const host = await docker.info();
+  if (limits.memory * MB > host.MemTotal) throw clientError(`memory: at most ${Math.floor(host.MemTotal / MB)} MB on this machine`);
+  if (limits.cpus > host.NCPU) throw clientError(`cpus: at most ${host.NCPU} on this machine`);
+  for (let waited = 0; memoryAvailable() < RESERVED * MB; waited++) {
+    if (waited >= wait) throw clientError(`not enough free memory on this machine (reserve: ${RESERVED} MB); try again later, or ask to wait with "wait"`, 503);
+    await sleep(1000);
+  }
+}
 
 const stateOf = (running: boolean): "running" | "stopped" => (running ? "running" : "stopped");
 // A sandbox id is the start of its container's Docker id: 12 hex characters.
@@ -31,13 +68,28 @@ async function pull(image: string) {
 const imageError = (image: string, error: Error) =>
   Object.assign(new Error(`image ${image}: ${error.message.replace(/^\(HTTP code \d+\)[^-]*- /, "").trim()}`), { statusCode: 400 });
 
-export async function create(image = IMAGE) {
+export async function create({ image = IMAGE, wait = 0, ...asked }: { image?: string; wait?: number } & Partial<Limits>) {
+  const limits = { ...DEFAULTS };
+  for (const [key, value] of Object.entries(asked)) if (value !== undefined) limits[key as keyof Limits] = value;
+  await fits(limits, wait);
   // sleep infinity does nothing and never ends: the container stays on.
   const options = {
     Image: image,
     Entrypoint: ["sleep", "infinity"],
-    Labels: { [LABEL]: "" },
-    HostConfig: { CapDrop: ["ALL"], CapAdd: CAPABILITIES },
+    Labels: { [LABEL]: "", [DISK_LABEL]: String(limits.disk) },
+    // The agent reads its limits with env: on runc, nproc, free and df show the whole machine.
+    Env: [`PARPAING_MEMORY_MB=${limits.memory}`, `PARPAING_CPUS=${limits.cpus}`, `PARPAING_PROCESSES=${limits.processes}`, `PARPAING_DISK_MB=${limits.disk}`],
+    HostConfig: {
+      CapDrop: ["ALL"],
+      CapAdd: CAPABILITIES,
+      // No swap: past its memory, the kernel kills a process of this sandbox, and only of this one.
+      Memory: limits.memory * MB,
+      MemorySwap: limits.memory * MB,
+      NanoCpus: Math.round(limits.cpus * 1e9),
+      PidsLimit: limits.processes,
+      // If the whole machine runs out of memory, the kernel kills sandbox processes first, not parpaing or Docker.
+      OomScoreAdj: 500,
+    },
   };
   const container = await docker.createContainer(options).catch(async (error) => {
     if (error.statusCode === 400) throw imageError(image, error);
@@ -52,7 +104,7 @@ export async function create(image = IMAGE) {
     await container.remove({ force: true });
     throw error.statusCode === 400 ? imageError(image, error) : error;
   });
-  return { id: shortId(container.id), state: stateOf(true) };
+  return { id: shortId(container.id), state: stateOf(true), ...limits };
 }
 
 export const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -67,6 +119,8 @@ export async function info() {
     engines: Object.keys(host.Runtimes ?? {}),
     cpus: host.NCPU,
     memory: host.MemTotal,
+    memoryAvailable: memoryAvailable(),
+    memoryReserved: RESERVED * MB,
     sandboxes: { total: containers.length, running },
   };
 }
@@ -83,12 +137,23 @@ export async function find(id: string) {
     if (error.statusCode !== 404) throw error;
   });
   if (info?.Config.Labels?.[LABEL] === undefined) return undefined;
-  return { container, running: info.State.Running };
+  return { container, running: info.State.Running, info };
 }
 
+// A sandbox created before limits existed has none: null.
 export async function get(id: string) {
   const found = await find(id);
-  return found && { id, state: stateOf(found.running) };
+  if (!found) return undefined;
+  const { HostConfig: host, Config: config } = found.info;
+  const or = (value: number | null | undefined) => value || null;
+  return {
+    id,
+    state: stateOf(found.running),
+    memory: or((host.Memory ?? 0) / MB),
+    cpus: or((host.NanoCpus ?? 0) / 1e9),
+    processes: or(host.PidsLimit),
+    disk: or(Number(config.Labels?.[DISK_LABEL])),
+  };
 }
 
 // Returns false when the sandbox does not exist.
