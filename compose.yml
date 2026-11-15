@@ -2,7 +2,7 @@
 # Both images come from ghcr.io. After changing the code, docker compose up -d --build builds them from this folder.
 services:
   parpaing:
-    image: ghcr.io/enixcode/parpaing:0.1.0
+    image: ghcr.io/enixcode/parpaing:0.2.0
     build: .
     container_name: parpaing
     restart: unless-stopped
@@ -26,7 +26,7 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
-    image: ghcr.io/enixcode/parpaing-gateway:0.1.0
+    image: ghcr.io/enixcode/parpaing-gateway:0.2.0
     container_name: parpaing-gateway
     restart: unless-stopped
     depends_on:
