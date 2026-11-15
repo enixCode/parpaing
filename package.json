@@ -1,0 +1,19 @@
+{
+  "name": "parpaing",
+  "version": "0.1.0",
+  "description": "Self-hosted sandboxes for AI agents, driven by an HTTP API.",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "type": "module",
+  "dependencies": {
+    "@hono/node-server": "^2.1.8",
+    "dockerode": "^5.0.1",
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.2",
+    "@types/node": "^26.6.6"
+  }
+}

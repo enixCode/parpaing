@@ -1,0 +1,44 @@
+# CI: build both images with compose, then smoke-test the sandbox API through the page.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API: http://127.0.0.1:8090
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and start
+        run: docker compose up -d --build
+
+      - name: Wait for the API
+        run: timeout 60 sh -c "until curl -fsS $API/info; do sleep 2; done"
+
+      - name: Smoke test
+        run: |
+          id=$(curl -fsS -X POST -H 'content-type: application/json' -d '{}' "$API/sandboxes" | jq -r .id)
+          [[ $id =~ ^[0-9a-f]{12}$ ]]
+          out=$(curl -fsS -X POST -H 'content-type: application/json' -d '{"cmd":["sh","-c","echo ok"]}' "$API/sandboxes/$id/exec")
+          echo "$out"
+          # The stream must end with exit code 0 and contain "ok" on stdout.
+          echo "$out" | tail -n 1 | jq -e '.exitCode == 0'
+          echo "$out" | jq -e -s 'any(.[]; .stream == "stdout" and (.data | contains("ok")))'
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$API/sandboxes/$id")" = 204
+
+      - name: Logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop
+        if: always()
+        run: docker compose down

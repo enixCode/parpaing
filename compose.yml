@@ -1,0 +1,24 @@
+# Use PARPAING_ADDRESS=0.0.0.0 to host on your public host ip
+services:
+  parpaing:
+    build: .
+    image: parpaing
+    container_name: parpaing
+    restart: unless-stopped
+    # ports: 
+    #   - "${PARPAING_ADDRESS:-127.0.0.1}:8090:8090"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  # The gateway, the only port: nginx serves the web page and the brand kit, and relays everything else to the API.
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: parpaing-gateway
+    container_name: parpaing-gateway
+    restart: unless-stopped
+    depends_on:
+      - parpaing
+    ports:
+      - "${PARPAING_ADDRESS:-127.0.0.1}:8090:80"

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>parpaing</title>
+<link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com/">
+<link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&amp;family=Martian+Mono:wght@500&amp;display=swap">
+<style>
+  :root {
+    /* Brand palette (docs/brand/README.md). */
+    --blue: #5cc2ff; --steel: #6e7891; --shade: #5c657b; --anthracite: #121419; --chalk: #e4e8ef;
+    --muted-tone: #9aa1b2; --wall: #191c24; --panel: #1f2330; --border: #333a4a;
+    /* Two functional colors the brand does not have: a failure must not look like the accent. */
+    --red: #ff7a6e;      /* failure on dark surfaces and as a fill: error status, stderr, delete */
+    --red-deep: #b3261e; /* the same signal as text on the light theme, where --red is too pale to read */
+    /* Roles, dark theme first. */
+    --bg: var(--anthracite); --card: var(--wall); --raise: var(--panel); --hole: var(--anthracite);
+    --line: var(--border); --edge: var(--steel); --text: var(--chalk); --muted: var(--muted-tone);
+    --err: var(--red); --mark: var(--blue);
+    --sans: Archivo, "Segoe UI", system-ui, sans-serif;
+    --mono: "Martian Mono", Consolas, "DejaVu Sans Mono", monospace;
+    --bar: 40px; /* height of the bottom bar */
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: var(--chalk); --card: #ffffff; --raise: var(--chalk); --hole: #ffffff;
+      --line: color-mix(in srgb, var(--steel) 35%, transparent); --text: var(--anthracite); --muted: var(--shade);
+      --err: var(--red-deep); --mark: var(--anthracite);
+      color-scheme: light;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  /* One screen: header, content, ground, bottom bar. Only inner areas scroll. */
+  body { margin: 0; height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; background: var(--bg); color: var(--text); font: 500 14px/1.5 var(--sans); }
+  h1, h2, p, ul, pre { margin: 0; }
+  ul { padding: 0; list-style: none; }
+  /* Width 125 % is for the parpaing name only (brand guide): headings stay at 100 %. */
+  h2 { font: 800 16px/1.3 var(--sans); }
+  code, pre, input { font: 500 12px/1.6 var(--mono); }
+  a { color: inherit; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 24px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  h1 img { display: block; width: auto; height: 28px; }
+  .lede { color: var(--muted); }
+  .shell { display: flex; min-height: 0; }
+  main { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; gap: 10px 16px; padding: 16px 20px 10px; }
+  .side { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  section { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+  .bar { display: flex; align-items: center; gap: 12px; min-height: 30px; margin-bottom: 12px; }
+  .bar h2 { margin-right: auto; }
+  h2.bar { gap: 0; }
+  .hint { margin: -6px 0 10px; color: var(--muted); font-size: 12px; }
+  #coming-next { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+
+  /* Steps: the number of the step to do now is filled, its box gets the accent. */
+  .num { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 10px; border: 1.5px solid var(--edge); border-radius: 4px; color: var(--muted); font: 700 12px/1 var(--sans); vertical-align: 1px; }
+  [data-step="1"] #step1, [data-step="2"] #step2, [data-step="3"] #step3 { border-color: color-mix(in srgb, var(--blue) 60%, var(--line)); }
+  [data-step="1"] #step1 .num, [data-step="2"] #step2 .num, [data-step="3"] #step3 .num { border-color: var(--blue); background: var(--blue); color: var(--anthracite); }
+  /* Step 2 is done once a sandbox is picked: its number turns grey. */
+  [data-step="3"] #step2 .num { border-color: var(--shade); background: var(--shade); color: var(--chalk); }
+
+  /* Controls. */
+  label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+  input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 4px; background: var(--hole); color: inherit; }
+  input::placeholder { color: var(--muted); opacity: 1; }
+  button { padding: 7px 14px; border: 1px solid var(--edge); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 9%, transparent); }
+  button.main { border-color: var(--blue); background: var(--blue); color: var(--anthracite); font-weight: 700; }
+  button.main:hover:not(:disabled) { background: color-mix(in srgb, var(--blue) 82%, #ffffff); }
+  button.danger { border-color: var(--err); color: var(--err); }
+  button.danger.armed { border-color: var(--red); background: var(--red); color: var(--anthracite); }
+  button:disabled { opacity: .55; cursor: default; }
+  .field { display: flex; flex-wrap: wrap; gap: 8px; }
+  .field input { flex: 1 1 180px; }
+
+  /* Messages and Aglo. */
+  .note { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 8px 12px; border-left: 3px solid var(--blue); border-radius: 0 4px 4px 0; background: var(--raise); overflow-wrap: anywhere; }
+  #list-note { margin: 0 0 10px; }
+  .note.error { border-left-color: var(--err); }
+  .note.working ~ ul .empty, .note.error ~ ul .empty { display: none; }
+  .aglo { flex: none; }
+  .aglo:empty { display: none; }
+  /* Every Aglo file has the same frame height: one height gives the same Aglo in every pose. */
+  .aglo img { display: block; height: 49px; }
+  [data-pose="empty"] img { height: 100px; margin: 0 auto 8px; }
+  .quiet, .empty { padding: 8px 0; color: var(--muted); }
+  .empty { padding-top: 12px; text-align: center; }
+  .empty b { display: block; color: var(--text); font-weight: 500; }
+
+  /* Step 2: one row per sandbox, the whole row picks it. */
+  #step2 { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #list { flex: 1; min-height: 0; margin: 0 -4px; padding: 2px 4px; overflow: auto; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--raise); cursor: pointer; }
+  .row + .row { margin-top: 6px; }
+  .row:hover { border-color: var(--edge); }
+  .row.chosen { border-color: var(--mark); box-shadow: inset 3px 0 var(--mark); }
+  .pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; text-align: left; }
+  .pick:hover:not(:disabled) { background: transparent; }
+  .pick:focus-visible { outline-offset: 0; }
+  .pick code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .block { flex: none; width: 30px; height: 18px; }
+  .state { margin-left: auto; color: var(--muted); }
+  .row .danger { flex: none; padding: 4px 10px; }
+
+  /* Step 3: the terminal fills the height. Dark in both themes, like the command box of the brand. Aglo stands on its top edge. */
+  #step3 { display: flex; flex-direction: column; min-height: 0; }
+  .stand { align-items: flex-end; margin-bottom: 0; }
+  .stand h2 { margin-bottom: 12px; overflow-wrap: anywhere; }
+  .stand h2 code { padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--raise); }
+  .stand .aglo { display: flex; align-items: flex-end; width: 116px; height: 75px; }
+  .stand .aglo img { height: 75px; margin-bottom: -3px; }
+  #exec { flex: 1; min-height: 0; display: flex; }
+  .term { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--anthracite); color: var(--chalk); }
+  #term:focus-visible, .prompt:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; }
+  #term { flex: 1; min-height: 0; padding: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  #term:empty::before { content: attr(data-hint); color: var(--muted-tone); font: 500 13px/1.5 var(--sans); }
+  #term .info { color: var(--muted-tone); word-break: normal; }
+  #term .stderr, #term .bad { color: var(--red); }
+  #term .dollar, #term .end { color: var(--blue); }
+  .prompt { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-top: 1px solid var(--border); background: var(--panel); color: var(--blue); font: 500 12px/1.6 var(--mono); }
+  .prompt label { margin: 0; color: inherit; }
+  .prompt input { flex: 1; padding: 6px 0; border: 0; outline: 0; background: transparent; color: var(--chalk); }
+  .prompt input::placeholder { color: var(--muted-tone); }
+  .prompt input:disabled { cursor: not-allowed; }
+  .prompt button { flex: none; font: 700 14px/1.5 var(--sans); }
+
+  /* API calls drawer: the request, the curl that does the same, the response on demand. */
+  #log-drawer { flex: none; width: 420px; display: flex; flex-direction: column; min-height: 0; padding: 14px 16px 0; border-left: 1px solid var(--line); background: var(--card); }
+  #log-drawer .bar button { padding: 4px 10px; }
+  .intro { margin: -4px 0 12px; color: var(--muted); font-size: 12px; }
+  #log { flex: 1; min-height: 0; margin: 0 -16px; padding: 0 16px 12px; overflow: auto; }
+  .call { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .call:first-child { border-top: 0; padding-top: 0; }
+  .call > * { min-width: 0; }
+  .line { display: flex; align-items: baseline; gap: 8px; }
+  .line code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .status { padding: 0 6px; border-radius: 3px; background: var(--blue); color: var(--anthracite); font: 500 12px/1.6 var(--mono); white-space: nowrap; }
+  .status.bad { background: var(--red); }
+  .status.run { background: var(--raise); color: var(--text); }
+  .ms { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .ms:empty { display: none; }
+  .call pre { max-height: 220px; padding: 6px 8px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--anthracite); color: var(--chalk); white-space: pre-wrap; word-break: break-all; }
+  .curl-row { display: flex; align-items: flex-start; gap: 6px; }
+  .curl-row pre { flex: 1; min-width: 0; }
+  .call .curl { background: var(--panel); }
+  .curl::before { content: "$ "; color: var(--blue); }
+  .curl-row button { flex: none; padding: 4px 10px; font-size: 12px; }
+  .sent::before { content: "body "; color: var(--muted-tone); }
+  summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+  details pre { margin-top: 6px; }
+
+  /* The wall of the banner, as the ground of the page. */
+  .ground { display: block; width: 100%; height: 22px; }
+  .ground .brick { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+  .ground .gap { fill: var(--bg); }
+
+  /* Bottom bar, always visible: where the API is, the last call, the drawer toggle. */
+  #statusbar { display: flex; align-items: center; gap: 10px; height: var(--bar); padding: 0 12px 0 20px; border-top: 1px solid var(--line); background: var(--card); font-size: 12px; white-space: nowrap; }
+  #statusbar .k { color: var(--muted); }
+  #status-api { flex: 0 10 auto; min-width: 10ch; overflow: hidden; text-overflow: ellipsis; }
+  #status-last { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 3px 8px; border-color: transparent; font-size: 12px; }
+  #status-last code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #log-toggle { flex: none; margin-left: auto; padding: 4px 10px; font-size: 12px; }
+  #log-toggle[aria-expanded="true"] { border-color: var(--mark); }
+  .count { margin-left: 6px; padding: 0 6px; border-radius: 3px; background: var(--raise); font: 500 11px/1.6 var(--mono); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    button, .row, .note, .num, #step1, #step2, #step3 { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s; }
+    @media (max-width: 1399px) { #log-drawer:not([hidden]) { animation: slide-in .2s ease-out; } }
+    @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
+    .call { animation: arrive 1s ease-out; }
+    .status.run { animation: pulse 1s ease-in-out infinite alternate; }
+    @keyframes arrive { from { background: color-mix(in srgb, var(--blue) 16%, transparent); } }
+    @keyframes pulse { to { opacity: .5; } }
+  }
+  /* Below 1400 px the drawer slides over the content instead of pushing it. */
+  @media (max-width: 1399px) {
+    #log-drawer { position: fixed; z-index: 10; top: 0; right: 0; bottom: var(--bar); width: min(440px, 100%); box-shadow: -12px 0 32px rgb(0 0 0 / .4); }
+  }
+  @media (max-height: 700px) { .ground { display: none; } }
+  /* Narrow screens: the steps stack and the page scrolls; the bar stays glued to the bottom. */
+  @media (max-width: 1023px) {
+    body { height: auto; min-height: 100dvh; overflow: visible; }
+    .shell { display: block; }
+    main { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+    #exec { min-height: 340px; }
+    #statusbar { position: sticky; z-index: 11; bottom: 0; }
+  }
+  @media (max-width: 640px) {
+    header { padding: 10px 12px; }
+    section { padding: 12px; }
+    #statusbar { padding-left: 12px; }
+    #statusbar .k { display: none; }
+    .field .main { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body data-step="1">
+<header>
+    <h1><picture><source media="(prefers-color-scheme: light)" srcset="/brand/logo-wordmark-light.svg"><img src="/brand/logo-wordmark-dark.svg" alt="parpaing"></picture></h1>
+  <p class="lede">Self-hosted Docker sandboxes for AI agents. Create one, pick it, run commands in it.</p>
+</header>
+
+<div class="shell">
+  <main>
+    <div class="side">
+      <section id="step1" aria-labelledby="new-title">
+        <h2 id="new-title" class="bar"><span class="num">1</span>Create a sandbox</h2>
+        <form id="create">
+          <label for="image">Image (optional)</label>
+          <div class="field">
+            <input id="image" placeholder="debian:trixie-slim" autocomplete="off" spellcheck="false" autofocus>
+            <button id="create-btn" class="main">Create sandbox</button>
+          </div>
+        </form>
+        <div id="create-note" class="note" role="status" hidden><span class="aglo"></span><span class="text"></span></div>
+      </section>
+
+      <section id="step2" aria-labelledby="list-title">
+        <div class="bar">
+          <h2 id="list-title"><span class="num">2</span>Your sandboxes</h2>
+          <button id="refresh">Refresh list</button>
+        </div>
+        <p class="hint">Click a sandbox to run commands in it.</p>
+        <div id="list-note" class="note" role="status" hidden><span class="aglo"></span><span class="text"></span></div>
+        <ul id="list" role="radiogroup" aria-labelledby="list-title"><li class="quiet">Loading sandboxes…</li></ul>
+      </section>
+    </div>
+
+    <section id="step3" aria-labelledby="term-title">
+      <div class="bar stand">
+        <h2 id="term-title"><span class="num">3</span>Run a command<span id="exec-in" hidden> in <code id="exec-target"></code></span></h2>
+        <span id="term-aglo" class="aglo"></span>
+      </div>
+      <form id="exec">
+        <div class="term">
+          <pre id="term" role="log" aria-label="Command output" tabindex="0"></pre>
+          <div class="prompt"><label for="cmd" aria-label="Command">$</label><input id="cmd" autocomplete="off" spellcheck="false"><button id="exec-btn" class="main">Run command</button></div>
+        </div>
+      </form>
+    </section>
+
+    <p id="coming-next">Coming next: stop a command, save and restore folders, an API key, limits per sandbox, internet through a proxy. <a href="https://github.com/enixCode/parpaing/blob/main/ROADMAP.md">Roadmap</a></p>
+  </main>
+
+  <aside id="log-drawer" aria-labelledby="log-title" hidden>
+    <div class="bar">
+      <h2 id="log-title">API calls</h2>
+      <button id="clear">Clear</button>
+      <button id="log-close">Close</button>
+    </div>
+    <p class="intro">Every call this page sends to the API. Copy the curl to do the same from a terminal.</p>
+    <ul id="log" role="log" aria-label="API calls, newest first" tabindex="0"><li class="quiet">No calls yet.</li></ul>
+  </aside>
+</div>
+
+<svg class="ground" aria-hidden="true"><defs><pattern id="wall" width="88" height="88" patternUnits="userSpaceOnUse" patternTransform="scale(.5)"><g class="brick"><rect x="-40" y="4" width="80" height="36" rx="3"/><rect x="48" y="4" width="80" height="36" rx="3"/><rect x="4" y="48" width="80" height="36" rx="3"/></g><g class="gap"><rect x="4" y="12" width="27" height="20" rx="2"/><rect x="57" y="12" width="27" height="20" rx="2"/><rect x="13" y="56" width="27" height="20" rx="2"/><rect x="48" y="56" width="27" height="20" rx="2"/></g></pattern></defs><rect width="100%" height="100%" fill="url(#wall)"/></svg>
+
+<footer id="statusbar">
+  <span class="k">API</span><code id="status-api"></code>
+  <span class="k">Last call</span><button type="button" id="status-last" title="Show the API calls">none yet</button>
+  <button type="button" id="log-toggle" aria-controls="log-drawer" aria-expanded="false">API calls<span id="log-count" class="count">0</span></button>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
