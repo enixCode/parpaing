@@ -8,7 +8,7 @@ import { stream } from "hono/streaming";
 import { startCommand } from "./exec.ts";
 import * as routes from "./routes.ts";
 import { UNKNOWN } from "./routes.ts";
-import { create, find, get, info, list, remove, VERSION } from "./sandboxes.ts";
+import * as sandboxes from "./sandboxes.ts";
 
 const app = new OpenAPIHono({
   // A refused request gets one sentence saying what to send; an id that cannot exist is an unknown sandbox.
@@ -27,7 +27,7 @@ if (KEY) {
     token: KEY,
     noAuthenticationHeader: { message: { error: "authorization: Bearer <PARPAING_API_KEY> required" } },
     invalidAuthenticationHeader: { message: { error: "authorization: Bearer <key> expected" } },
-    invalidToken: { message: { error: "wrong API key" } },
+    invalidToken: { message: { error: "wrong API key :(" } },
   });
   app.use("*", (c, next) => (c.req.path === "/openapi.json" ? next() : auth(c, next)));
 }
@@ -43,21 +43,21 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.openapi(routes.createSandbox, async (c) => c.json(await create(c.req.valid("json")), 201));
+app.openapi(routes.createSandbox, async (c) => c.json(await sandboxes.create(c.req.valid("json")), 201));
 
-app.openapi(routes.listSandboxes, async (c) => c.json(await list(), 200));
+app.openapi(routes.listSandboxes, async (c) => c.json(await sandboxes.list(), 200));
 
 app.openapi(routes.getSandbox, async (c) => {
-  const sandbox = await get(c.req.valid("param").id);
+  const sandbox = await sandboxes.get(c.req.valid("param").id);
   return sandbox ? c.json(sandbox, 200) : c.json(UNKNOWN, 404);
 });
 
-app.openapi(routes.deleteSandbox, async (c) => ((await remove(c.req.valid("param").id)) ? c.body(null, 204) : c.json(UNKNOWN, 404)));
+app.openapi(routes.deleteSandbox, async (c) => ((await sandboxes.remove(c.req.valid("param").id)) ? c.body(null, 204) : c.json(UNKNOWN, 404)));
 
 // Runs a command and streams its output live: one JSON line per chunk, then its exit code.
 // Refusals (400, 404, 409) come before any line; a client that leaves does not stop it.
 app.openapi(routes.runCommand, async (c) => {
-  const found = await find(c.req.valid("param").id);
+  const found = await sandboxes.find(c.req.valid("param").id);
   if (!found) return c.json(UNKNOWN, 404);
   if (!found.running) return c.json({ error: "sandbox stopped" }, 409);
   const follow = await startCommand(found.container, c.req.valid("json").cmd);
@@ -77,9 +77,9 @@ app.openapi(routes.runCommand, async (c) => {
 });
 
 // What this machine offers: version, engines, capacity, sandbox count. A central server uses it to place sandboxes.
-app.openapi(routes.machineInfo, async (c) => c.json(await info(), 200));
+app.openapi(routes.machineInfo, async (c) => c.json(await sandboxes.info(), 200));
 
-app.doc31("/openapi.json", routes.document(VERSION));
+app.doc31("/openapi.json", routes.document(sandboxes.VERSION));
 
 app.notFound((c) => c.json({ error: "unknown route" }, 404));
 
