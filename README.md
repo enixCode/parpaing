@@ -28,7 +28,7 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Feature | Endpoint | What it does | Status |
 |---|---|---|---|
 | Sandboxes (CRUD) | `POST /sandboxes`<br>`GET /sandboxes`<br>`GET /sandboxes/:id`<br>`DELETE /sandboxes/:id` | Create, list, read, remove | 🟢 Done |
-| Run a command | `POST /sandboxes/:id/exec` | Live output, then the exit code | 🟢 Done |
+| Run a command | `POST /sandboxes/:id/exec` | The exit code, stdout and stderr in one answer; `stream: true` for live output | 🟢 Done |
 | Info | `GET /info` | Version, engines, capacity, sandbox count | 🟢 Done |
 | OpenAPI | `GET /openapi.json` | The API description, generated from the code | 🟢 Done |
 | Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back, streamed (tested with 3 GB). The image needs `tar` | 🟢 Done |

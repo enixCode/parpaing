@@ -51,7 +51,22 @@ const NewSandbox = z.object({
   wait: whole(WAIT_HELP, 0).max(300, { error: WAIT_HELP }).optional().openapi({ description: "Seconds to wait if the machine lacks free memory, 0 by default", example: 30 }),
 });
 const Folder = z.object({ path: z.string({ error: PATH_HELP }).startsWith("/", { error: PATH_HELP }).openapi({ example: "/root/project" }) });
-const Command = z.object({ cmd: z.array(z.string({ error: CMD_HELP }), { error: CMD_HELP }).min(1, { error: CMD_HELP }).openapi({ example: ["ls", "-la"] }) });
+const STREAM_HELP = "stream: true for live output, false (the default) for one answer when the command ends";
+const Command = z.object({
+  cmd: z.array(z.string({ error: CMD_HELP }), { error: CMD_HELP }).min(1, { error: CMD_HELP }).openapi({ example: ["ls", "-la"] }),
+  stream: z
+    .boolean({ error: STREAM_HELP })
+    .optional()
+    .openapi({ description: "false by default: one JSON answer when the command ends. true: one JSON line per output chunk as it comes, then the exit code" }),
+});
+const CommandResult = z
+  .object({
+    exitCode: z.number().int(),
+    stdout: z.string(),
+    stderr: z.string(),
+    truncated: z.boolean().openapi({ description: "stdout or stderr went past 10 MB and was cut" }),
+  })
+  .openapi("CommandResult");
 const Info = z
   .object({
     name: z.string(),
@@ -128,11 +143,14 @@ export const runCommand = createRoute({
   summary: "Run a command",
   tags: ["Commands"],
   description:
-    "Streams the output live, one JSON object per line: stdout and stderr chunks as they come, then the exit code. A failure after the start ends the stream with an error line.",
+    "Runs the command to its end and answers once: exit code, stdout and stderr (each cut past 10 MB). With stream: true, the output comes live instead, one JSON object per line: stdout and stderr chunks as they come, then the exit code; a failure after the start ends that stream with an error line. A client that leaves does not stop the command.",
   request: { params: Params, ...body(Command) },
   responses: {
-    200: { description: "One ExecLine per line, the last one holds the exit code", content: { "application/x-ndjson": { schema: ExecLine } } },
-    400: json(Problem, "No command"),
+    200: {
+      description: "The result in one JSON answer, or with stream: true one ExecLine per line, the last one holding the exit code",
+      content: { "application/json": { schema: CommandResult }, "application/x-ndjson": { schema: ExecLine } },
+    },
+    400: json(Problem, "No command, or stream not a boolean"),
     404: NOT_FOUND,
     409: STOPPED,
     415: NOT_JSON,

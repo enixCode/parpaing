@@ -39,8 +39,10 @@ async function newSandbox() {
 
 const lines = (text: string) => text.trim().split("\n").map((line) => JSON.parse(line));
 // The whole stdout of a command, whatever chunks it came in.
-const stdout = (text: string) => lines(text).filter((line) => line.stream === "stdout").map((line) => line.data).join("");
+const stdout = (text: string) => JSON.parse(text).stdout as string;
+// One answer when the command ends (the default), or the live stream.
 const exec = (id: string, cmd: unknown) => api("POST", `/sandboxes/${id}/exec`, { cmd });
+const execStream = (id: string, cmd: unknown) => api("POST", `/sandboxes/${id}/exec`, { cmd, stream: true });
 
 after(async () => {
   for (const id of created) await api("DELETE", `/sandboxes/${id}`);
@@ -121,10 +123,10 @@ describe("limits", () => {
     created.push(id);
     // tail keeps the last lines of an endless input without newlines: its memory grows until the kernel stops it.
     const run = await exec(id, ["sh", "-c", "tail /dev/zero"]);
-    assert.notDeepEqual(lines(run.text).at(-1), { exitCode: 0 });
+    assert.notEqual(run.data.exitCode, 0);
     // runc kills one process and the sandbox lives on; gVisor stops the whole sandbox, which Docker then starts again.
     if (!GVISOR) {
-      assert.deepEqual(lines(run.text).at(-1), { exitCode: 137 });
+      assert.equal(run.data.exitCode, 137);
       assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
     }
   });
@@ -172,25 +174,39 @@ describe("limits", () => {
 });
 
 describe("commands", () => {
-  test("streams stdout, then the exit code", async () => {
-    const res = await exec(await newSandbox(), ["sh", "-c", "echo ok"]);
+  test("answers once with the exit code, stdout and stderr apart", async () => {
+    const res = await exec(await newSandbox(), ["sh", "-c", "echo out; echo oops >&2; exit 3"]);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /^application\/json/);
+    assert.deepEqual(res.data, { exitCode: 3, stdout: "out\n", stderr: "oops\n", truncated: false });
+  });
+
+  test("cuts an output past 10 MB and says so", async () => {
+    const res = await exec(await newSandbox(), ["sh", "-c", "head -c 11000000 /dev/zero | tr '\\0' a"]);
+    assert.equal(res.data.exitCode, 0);
+    assert.equal(res.data.truncated, true);
+    assert.equal(res.data.stdout.length, 10 * 1024 * 1024);
+  });
+
+  test("with stream, sends stdout, then the exit code", async () => {
+    const res = await execStream(await newSandbox(), ["sh", "-c", "echo ok"]);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "application/x-ndjson");
     assert.deepEqual(lines(res.text), [{ stream: "stdout", data: "ok\n" }, { exitCode: 0 }]);
   });
 
-  test("keeps stderr apart and returns a failing exit code", async () => {
-    const res = await exec(await newSandbox(), ["sh", "-c", "echo oops >&2; exit 3"]);
+  test("with stream, keeps stderr apart and returns a failing exit code", async () => {
+    const res = await execStream(await newSandbox(), ["sh", "-c", "echo oops >&2; exit 3"]);
     assert.deepEqual(lines(res.text), [{ stream: "stderr", data: "oops\n" }, { exitCode: 3 }]);
   });
 
-  test("sends each chunk as it comes, not at the end", async () => {
+  test("with stream, sends each chunk as it comes, not at the end", async () => {
     const id = await newSandbox();
     const started = performance.now();
     const res = await fetch(`${BASE}/sandboxes/${id}/exec`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(KEY ? { authorization: `Bearer ${KEY}` } : {}) },
-      body: JSON.stringify({ cmd: ["sh", "-c", "echo first; sleep 2; echo second"] }),
+      body: JSON.stringify({ cmd: ["sh", "-c", "echo first; sleep 2; echo second"], stream: true }),
     });
     const reader = res.body!.getReader();
     await reader.read();
@@ -207,6 +223,9 @@ describe("commands", () => {
       assert.equal(res.status, 400);
       assert.equal(res.data.error, 'cmd: a command as an array, for example ["ls", "-la"]');
     }
+    const stream = await api("POST", `/sandboxes/${id}/exec`, { cmd: ["true"], stream: "yes" });
+    assert.equal(stream.status, 400);
+    assert.match(stream.data.error, /^stream: /);
   });
 
   test("root keeps only the 9 capabilities parpaing grants, for good", async () => {
@@ -244,7 +263,7 @@ describe("network", () => {
   test("has no direct way out", async () => {
     const id = await newSandbox();
     const run = await exec(id, ["bash", "-c", "timeout 5 bash -c '</dev/tcp/1.1.1.1/443'"]);
-    assert.notDeepEqual(lines(run.text).at(-1), { exitCode: 0 });
+    assert.notEqual(run.data.exitCode, 0);
   });
 
   test("the proxy refuses the host, the local network, metadata and other sandboxes", async () => {
