@@ -37,8 +37,6 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Network | `POST /sandboxes` + `network` | `internet` through the egress proxy (HTTP, HTTPS, SOCKS5, ssh), or `none` | 🟢 Done |
 | Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor), `PARPAING_RUNTIME` for the default | 🟢 Done |
 
-🟢 Done: works today, can still change before 1.0.0. 🟡 In progress: being built. ⚪ Planned: not started.
-
 See the details in [ROADMAP.md](ROADMAP.md).
 
 ## Isolation
