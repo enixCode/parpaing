@@ -39,6 +39,20 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 
 See the details in [ROADMAP.md](ROADMAP.md).
 
+## SDK
+
+TypeScript, no dependency (Node 18+, Deno, Bun, browsers), in [sdk/](sdk/). Not on npm yet.
+
+```ts
+import { Parpaing } from "parpaing";
+
+const parpaing = new Parpaing({ url: "http://127.0.0.1:8090" });
+const { id } = await parpaing.create({ image: "node:24" });
+await parpaing.exec(id, ["node", "-v"]); // { exitCode, stdout, stderr, truncated }
+await parpaing.exec(id, ["npm", "test"], { onOutput: (data) => process.stdout.write(data) }); // live, then { exitCode }
+await parpaing.delete(id);
+```
+
 ## Isolation
 
 | Engine | What it is | For | Status |

@@ -1,0 +1,28 @@
+{
+  "name": "parpaing",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for parpaing: self-hosted sandboxes for AI agents, driven by an HTTP API.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "prepack": "tsc -p ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/enixCode/parpaing.git",
+    "directory": "sdk"
+  },
+  "homepage": "https://parpaing.dev",
+  "keywords": ["sandbox", "ai-agents", "docker", "gvisor", "code-execution"]
+}
