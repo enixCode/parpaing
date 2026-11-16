@@ -34,7 +34,7 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back, streamed (tested with 3 GB). The image needs `tar` | 🟢 Done |
 | API key | `Authorization: Bearer <key>` | Optional, with `PARPAING_API_KEY` | 🟢 Done |
 | Limits | `POST /sandboxes` + `memory`, `cpus`, `processes`, `disk`, `wait` | Ceilings per sandbox, readable inside with `env`. Disk: enforced on gVisor only | 🟢 Done |
-| Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor) | ⚪ Planned |
+| Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor), `PARPAING_RUNTIME` for the default | 🟢 Done |
 
 🟢 Done: works today, can still change before 1.0.0. 🟡 In progress: being built. ⚪ Planned: not started.
 
@@ -45,8 +45,19 @@ See the details in [ROADMAP.md](ROADMAP.md).
 | Engine | What it is | For | Status |
 |---|---|---|---|
 | runc | Docker's default: the sandbox shares the host's kernel | Dev, pre-prod | 🟢 Done |
-| runsc (gVisor) | A kernel in Go between the sandbox and the host, on any Linux server, no KVM needed | Prod | ⚪ Planned |
+| runsc (gVisor) | A kernel in Go between the sandbox and the host, on any Linux server, no KVM needed. Enforces the disk limit | Prod | 🟢 Done |
 | Kata Containers | A small virtual machine per sandbox, needs KVM | To plan | ⚪ Planned |
+
+To use runsc, install gVisor once per machine; it registers itself in Docker:
+
+```sh
+URL=https://storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)
+wget $URL/gvisor.tar.zstd $URL/gvisor.tar.zstd.sha512 && sha512sum -c gvisor.tar.zstd.sha512
+sudo tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin
+sudo runsc install && sudo systemctl restart docker
+```
+
+Then ask `"runtime": "runsc"` per sandbox, or set `PARPAING_RUNTIME=runsc` for every sandbox.
 
 Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 

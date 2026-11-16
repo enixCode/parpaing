@@ -36,25 +36,25 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 17 | Egress proxy | Internet only through a proxy | < 1.0.0 | ⚪ Planned |
 | 18 | Result in one answer | The whole output and the exit code in one JSON | < 1.0.0 | ⚪ Planned |
 | 19 | Archives | `GET` and `PUT /sandboxes/:id/archive?path=`: a folder out as a tar, a tar back into a folder, made by the sandbox's own `tar` so it works the same on every engine | < 1.0.0 | 🟢 Done |
+| 20 | gVisor (runsc) | Stronger isolation: `runtime` per sandbox, `PARPAING_RUNTIME` for the default | < 1.0.0 | 🟢 Done |
+| 21 | Disk limit | Per sandbox on runsc, set by parpaing at creation; runc and Kata only record it | < 1.0.0 | 🟢 Done |
 | | **🚀 Release 1.0.0** | The API is frozen: from here on, breaking changes only come with a new major | 1.0.0 | ⚪ Planned |
-| 20 | Labels | Key-value pairs on a sandbox, and filter the list by label | 1.x | ⚪ Planned |
-| 21 | Time to live | Removed after a set time, fixed at creation | 1.x | ⚪ Planned |
-| 22 | Stop and start | Pause a sandbox, keep its files | 1.x | ⚪ Planned |
-| 23 | Idle stop | Paused after some time without activity | 1.x | ⚪ Planned |
-| 24 | Live resize | More memory or CPU for a running sandbox. To verify on runsc and Kata first | 1.x | ⚪ Planned |
-| 25 | Key rotation | Two keys accepted at once, to change the key without downtime | 1.x | ⚪ Planned |
-| 26 | Sandbox daemon | A small program inside each sandbox, the base of 27 to 31 | 1.x | ⚪ Planned |
-| 27 | Sessions | A shell that keeps its folder and variables, background commands | 1.x | ⚪ Planned |
-| 28 | Command id | Each command gets an id, through the daemon. A new route: the `exec` stream above stays as it is | 1.x | ⚪ Planned |
-| 29 | Stop a command | By its id, with everything it started | 1.x | ⚪ Planned |
-| 30 | File API | Read, write and list files with WebDAV, the standard protocol (Explorer, Finder, WinSCP, rclone), served by the daemon | 1.x | ⚪ Planned |
-| 31 | Interactive terminal | Live keyboard, resizable | 1.x | ⚪ Planned |
-| 32 | SSH (to decide) | `ssh <id>@host` through a gateway, no SSH server in the sandbox. How, and whether we want it, is still open | 1.x | ⚪ Planned |
-| 33 | Allowed domains | Per sandbox, or block everything, fixed at creation | 1.x | ⚪ Planned |
-| 34 | Preview URLs | Open a sandbox port in the browser | 1.x | ⚪ Planned |
-| 35 | HTTPS | To expose the server safely | 1.x | ⚪ Planned |
-| 36 | gVisor (runsc) | Stronger isolation, chosen per sandbox | 1.x | ⚪ Planned |
-| 37 | Disk limit | Per sandbox | 1.x | ⚪ Planned |
+| 22 | Labels | Key-value pairs on a sandbox, and filter the list by label | 1.x | ⚪ Planned |
+| 23 | Time to live | Removed after a set time, fixed at creation | 1.x | ⚪ Planned |
+| 24 | Stop and start | Pause a sandbox, keep its files | 1.x | ⚪ Planned |
+| 25 | Idle stop | Paused after some time without activity | 1.x | ⚪ Planned |
+| 26 | Live resize | More memory or CPU for a running sandbox. To verify on runsc and Kata first | 1.x | ⚪ Planned |
+| 27 | Key rotation | Two keys accepted at once, to change the key without downtime | 1.x | ⚪ Planned |
+| 28 | Sandbox daemon | A small program inside each sandbox, the base of 29 to 33 | 1.x | ⚪ Planned |
+| 29 | Sessions | A shell that keeps its folder and variables, background commands | 1.x | ⚪ Planned |
+| 30 | Command id | Each command gets an id, through the daemon. A new route: the `exec` stream above stays as it is | 1.x | ⚪ Planned |
+| 31 | Stop a command | By its id, with everything it started | 1.x | ⚪ Planned |
+| 32 | File API | Read, write and list files with WebDAV, the standard protocol (Explorer, Finder, WinSCP, rclone), served by the daemon | 1.x | ⚪ Planned |
+| 33 | Interactive terminal | Live keyboard, resizable | 1.x | ⚪ Planned |
+| 34 | SSH (to decide) | `ssh <id>@host` through a gateway, no SSH server in the sandbox. How, and whether we want it, is still open | 1.x | ⚪ Planned |
+| 35 | Allowed domains | Per sandbox, or block everything, fixed at creation | 1.x | ⚪ Planned |
+| 36 | Preview URLs | Open a sandbox port in the browser | 1.x | ⚪ Planned |
+| 37 | HTTPS | To expose the server safely | 1.x | ⚪ Planned |
 | 38 | Metrics | Prometheus and OpenTelemetry | 1.x | ⚪ Planned |
 | 39 | SDK | TypeScript first, then Python | 1.x | ⚪ Planned |
 | 40 | CLI | Drive parpaing from a terminal | 1.x | ⚪ Planned |
