@@ -1,5 +1,5 @@
 # Use PARPAING_ADDRESS=0.0.0.0 to host on your public host ip
-# Both images come from ghcr.io. After changing the code, docker compose up -d --build builds them from this folder.
+# The images come from ghcr.io. After changing the code, docker compose up -d --build builds them from this folder.
 services:
   parpaing:
     image: ghcr.io/enixcode/parpaing:0.2.0
@@ -20,8 +20,22 @@ services:
       - PARPAING_DISK
       # Optional: free memory kept for the machine, in MB (512): under it, no new sandbox.
       - PARPAING_RESERVED_MEMORY
+      # Optional: the address range cut into one small network per sandbox (10.89.0.0/16, 4096 sandboxes).
+      - PARPAING_SUBNETS
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
+
+  # The egress proxy (GOST): the only way out for sandboxes, each alone in an internal network. Its kernel refuses private
+  # destinations; NET_ADMIN lets it set those rules in its own network namespace, not on the host.
+  egress:
+    build:
+      context: .
+      dockerfile: egress/Dockerfile
+    image: ghcr.io/enixcode/parpaing-egress:0.2.0
+    container_name: parpaing-egress
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
 
   # The gateway, the only port: nginx serves the web page and the brand kit, and relays everything else to the API.
   gateway:

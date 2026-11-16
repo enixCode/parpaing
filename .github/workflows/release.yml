@@ -1,4 +1,4 @@
-# Release: on a version tag, push both images to GHCR for linux/amd64 and linux/arm64.
+# Release: on a version tag, push the three images to GHCR for linux/amd64 and linux/arm64.
 name: release
 
 on:
@@ -19,6 +19,8 @@ jobs:
             file: Dockerfile
           - image: ghcr.io/enixcode/parpaing-gateway
             file: gateway/Dockerfile
+          - image: ghcr.io/enixcode/parpaing-egress
+            file: egress/Dockerfile
     steps:
       - uses: actions/checkout@v7
 

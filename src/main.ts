@@ -8,6 +8,7 @@ import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { readFolder, writeFolder } from "./archive.ts";
 import { startCommand } from "./exec.ts";
+import { followEgress } from "./network.ts";
 import * as routes from "./routes.ts";
 import { UNKNOWN } from "./routes.ts";
 import * as sandboxes from "./sandboxes.ts";
@@ -109,6 +110,9 @@ app.onError((error, c) => {
 
 // parpaing listens on every address of its container, otherwise Docker cannot forward the port to it.
 // compose decides who can reach it: 127.0.0.1 by default, PARPAING_ADDRESS for the network.
+// The egress proxy gets its legs back in every sandbox network now, and whenever it starts again.
+followEgress().catch((error) => console.error(`egress: ${error.message}`));
+
 serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 8090 }, () =>
   console.log(`parpaing: sandbox API on port 8090, ${KEY ? "API key required" : "no API key (PARPAING_API_KEY): open to anyone who reaches the port"}`),
 );

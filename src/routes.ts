@@ -12,6 +12,7 @@ const DISK_HELP = "disk: megabytes, a whole number from 1, for example 20480";
 const WAIT_HELP = "wait: seconds to wait for free memory, a whole number from 0 to 300";
 const PATH_HELP = "path: an absolute folder path, for example /root/project";
 const RUNTIME_HELP = "runtime: an engine of this machine, for example runsc (GET /info lists them)";
+const NETWORK_HELP = 'network: "internet" (through the egress proxy) or "none"';
 
 const Problem = z.object({ error: z.string() }).openapi("Error");
 const Id = z.string().regex(/^[0-9a-f]{12}$/).openapi({ example: "3f9a2c7d1e4b" });
@@ -24,6 +25,7 @@ const Sandbox = z
     id: Id,
     state: State,
     runtime: z.string().openapi({ example: "runc" }),
+    network: z.enum(["internet", "none"]),
     memory: limit("Megabytes"),
     cpus: limit("CPUs"),
     processes: limit("Processes and threads"),
@@ -38,6 +40,10 @@ const NewSandbox = z.object({
     .min(1, { error: RUNTIME_HELP })
     .optional()
     .openapi({ description: "The engine, runc by default (PARPAING_RUNTIME). GET /info lists this machine's engines", example: "runsc" }),
+  network: z
+    .enum(["internet", "none"], { error: NETWORK_HELP })
+    .optional()
+    .openapi({ description: "internet by default: through the egress proxy only (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY), never to the host, the local network or other sandboxes. none: no network" }),
   memory: whole(MEMORY_HELP, 16).optional().openapi({ description: "Megabytes, 1024 by default (PARPAING_MEMORY)", example: 2048 }),
   cpus: z.number({ error: CPUS_HELP }).min(0.01, { error: CPUS_HELP }).optional().openapi({ description: "1 by default (PARPAING_CPUS)", example: 2 }),
   processes: whole(PROCESSES_HELP, 16).optional().openapi({ description: "1024 by default (PARPAING_PROCESSES)", example: 1024 }),
@@ -79,7 +85,7 @@ export const createSandbox = createRoute({
   summary: "Create a sandbox",
   tags: ["Sandboxes"],
   description:
-    "Starts a container from the image, debian:trixie-slim when none is given. A missing image is downloaded first. Memory, CPUs, processes and disk are ceilings, not reservations; the disk limit holds on runsc only. The sandbox finds its limits in its environment (PARPAING_MEMORY_MB, PARPAING_CPUS, PARPAING_PROCESSES, PARPAING_DISK_MB).",
+    "Starts a container from the image, debian:trixie-slim when none is given. A missing image is downloaded first. Memory, CPUs, processes and disk are ceilings, not reservations; the disk limit holds on runsc only. The sandbox finds its limits in its environment (PARPAING_MEMORY_MB, PARPAING_CPUS, PARPAING_PROCESSES, PARPAING_DISK_MB), and its way out in the proxy variables (PARPAING_PROXY for ssh).",
   request: body(NewSandbox),
   responses: {
     201: json(Sandbox, "The sandbox, running"),

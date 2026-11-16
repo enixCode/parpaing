@@ -101,8 +101,8 @@ describe("limits", () => {
     assert.equal(res.status, 201);
     const { id } = res.data;
     created.push(id);
-    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", runtime: RUNTIME, memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
-    const env = await exec(id, ["sh", "-c", "env | grep ^PARPAING_ | sort"]);
+    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", runtime: RUNTIME, network: "internet", memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
+    const env = await exec(id, ["sh", "-c", "env | grep -E '^PARPAING_(CPUS|DISK_MB|MEMORY_MB|PROCESSES)=' | sort"]);
     assert.deepEqual(stdout(env.text).trim().split("\n"), [
       "PARPAING_CPUS=0.5",
       "PARPAING_DISK_MB=2048",
@@ -222,6 +222,54 @@ describe("commands", () => {
       assert.equal(res.status, 404);
       assert.deepEqual(res.data, { error: "unknown sandbox" });
     }
+  });
+});
+
+describe("network", () => {
+  // Asks the proxy for a tunnel, as curl does with HTTPS_PROXY: the first line of its answer says whether it agreed.
+  const tunnel = (id: string, target: string) =>
+    exec(id, [
+      "bash",
+      "-c",
+      'exec 3<>/dev/tcp/${PARPAING_PROXY%:*}/${PARPAING_PROXY#*:}; printf "CONNECT ' + target + ' HTTP/1.1\\r\\nHost: ' + target + '\\r\\n\\r\\n" >&3; timeout 15 head -1 <&3',
+    ]);
+  const agreed = (text: string) => /^HTTP\/1\.[01] 200/.test(stdout(text));
+
+  test("reaches the internet through the proxy, raw TCP included", async () => {
+    const id = await newSandbox();
+    assert.ok(agreed((await tunnel(id, "example.com:443")).text), "https");
+    assert.ok(agreed((await tunnel(id, "github.com:22")).text), "ssh");
+  });
+
+  test("has no direct way out", async () => {
+    const id = await newSandbox();
+    const run = await exec(id, ["bash", "-c", "timeout 5 bash -c '</dev/tcp/1.1.1.1/443'"]);
+    assert.notDeepEqual(lines(run.text).at(-1), { exitCode: 0 });
+  });
+
+  test("the proxy refuses the host, the local network, metadata and other sandboxes", async () => {
+    const id = await newSandbox();
+    const other = await newSandbox();
+    const address = stdout((await exec(other, ["sh", "-c", "grep \"$(cat /etc/hostname)\" /etc/hosts | cut -f1"])).text).trim();
+    assert.match(address, /^10\.89\./);
+    for (const target of ["169.254.169.254:80", "172.17.0.1:2375", "192.168.1.1:80", "10.0.0.1.nip.io:80", `${address}:22`]) {
+      assert.ok(!agreed((await tunnel(id, target)).text), target);
+    }
+  });
+
+  test("none gives no network at all", async () => {
+    const res = await api("POST", "/sandboxes", { network: "none" });
+    assert.equal(res.status, 201);
+    created.push(res.data.id);
+    assert.equal(res.data.network, "none");
+    const interfaces = stdout((await exec(res.data.id, ["sh", "-c", "tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' '"])).text).trim();
+    assert.equal(interfaces, "lo");
+  });
+
+  test("refuses an unknown network mode", async () => {
+    const res = await api("POST", "/sandboxes", { network: "lan" });
+    assert.equal(res.status, 400);
+    assert.match(res.data.error, /^network: /);
   });
 });
 
