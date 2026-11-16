@@ -31,7 +31,7 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Run a command | `POST /sandboxes/:id/exec` | Live output, then the exit code | 🟢 Done |
 | Info | `GET /info` | Version, engines, capacity, sandbox count | 🟢 Done |
 | OpenAPI | `GET /openapi.json` | The API description, generated from the code | 🟢 Done |
-| Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back. The image needs `tar` | 🟢 Done |
+| Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back, streamed (tested with 3 GB). The image needs `tar` | 🟢 Done |
 | API key | `Authorization: Bearer <key>` | Optional, with `PARPAING_API_KEY` | 🟢 Done |
 | Limits | `POST /sandboxes` + `memory`, `cpus`, `processes`, `disk`, `wait` | Ceilings per sandbox, readable inside with `env`. Disk: enforced on gVisor only | 🟢 Done |
 | Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor) | ⚪ Planned |
