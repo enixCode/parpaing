@@ -2,7 +2,7 @@
   "name": "parpaing",
   "version": "1.0.0",
   "description": "TypeScript SDK for parpaing: self-hosted sandboxes for AI agents, driven by an HTTP API.",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": {
