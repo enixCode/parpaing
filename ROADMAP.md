@@ -8,8 +8,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 
 ## Versions
 
-- **< 1.0.0: everything can still change.** The 0.x versions come out along the way, 0.1.0 first.
-- **1.0.0 freezes the API.** It holds what would break clients if added later (the API key, the command stream), plus what makes parpaing safe to run.
+- **1.0.0 froze the API.** It holds what would break clients if added later (the API key, the command result and stream), plus what makes parpaing safe to run.
 - **1.x adds without breaking.** New routes and new optional fields only.
 - **2.x, 3.x: later phases.** A new major only comes if a change has to break the API.
 
@@ -38,7 +37,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 19 | Archives | `GET` and `PUT /sandboxes/:id/archive?path=`: a folder out as a tar, a tar back into a folder, made by the sandbox's own `tar` so it works the same on every engine | < 1.0.0 | 🟢 Done |
 | 20 | gVisor (runsc) | Stronger isolation: `runtime` per sandbox, `PARPAING_RUNTIME` for the default | < 1.0.0 | 🟢 Done |
 | 21 | Disk limit | Per sandbox on runsc, set by parpaing at creation; runc and Kata only record it | < 1.0.0 | 🟢 Done |
-| | **🚀 Release 1.0.0** | The API is frozen: from here on, breaking changes only come with a new major | 1.0.0 | ⚪ Planned |
+| | **🚀 Release 1.0.0** | The API is frozen: from here on, breaking changes only come with a new major | 1.0.0 | 🟢 Done |
 | 22 | Labels | Key-value pairs on a sandbox, and filter the list by label | 1.x | ⚪ Planned |
 | 23 | Time to live | Removed after a set time, fixed at creation | 1.x | ⚪ Planned |
 | 24 | Stop and start | Pause a sandbox, keep its files | 1.x | ⚪ Planned |

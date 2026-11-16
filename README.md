@@ -6,7 +6,7 @@
 
 Website: <https://parpaing.dev>
 
-> **Early stage.** parpaing is not stable yet: the API will change until 1.0.0. The changes will land over the coming weeks, to reach 1.0.0 quickly. See the [roadmap](ROADMAP.md).
+> **Stable since 1.0.0.** The API follows semantic versioning: no breaking change before 2.0.0, only new routes and new optional fields. See the [roadmap](ROADMAP.md).
 
 ## Quick start
 
