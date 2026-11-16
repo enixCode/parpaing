@@ -2,7 +2,7 @@
 
 Every feature, in the order it gets built: what is done, then what comes next, down to the last one.
 
-🟢 Done: works today, can still change before 1.0.0. 🟡 In progress: being built. ⚪ Planned: not started.
+🟢 Done: works today. 🟡 In progress: being built. ⚪ Planned: not started.
 
 Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 
@@ -55,7 +55,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 36 | Preview URLs | Open a sandbox port in the browser | 1.x | ⚪ Planned |
 | 37 | HTTPS | To expose the server safely | 1.x | ⚪ Planned |
 | 38 | Metrics | Prometheus and OpenTelemetry | 1.x | ⚪ Planned |
-| 39 | SDK | TypeScript first, then Python | 1.x | ⚪ Planned |
+| 39 | SDK | TypeScript in [sdk/](sdk/), on npm next; then Python | 1.x | 🟡 In progress |
 | 40 | CLI | Drive parpaing from a terminal | 1.x | ⚪ Planned |
 | 41 | MCP server | Agents call parpaing directly | 1.x | ⚪ Planned |
 | 42 | Snapshots | Turn a sandbox into a reusable image | 2.x | ⚪ Planned |

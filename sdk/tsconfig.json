@@ -1,0 +1,15 @@
+{
+  // Builds dist/ for npm (npm run build): JavaScript and its types. Only fetch and web streams, no Node types.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["es2022", "dom"],
+    "types": [],
+    "declaration": true,
+    "outDir": "dist",
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["index.ts"]
+}

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "test": "node --test tests/*.test.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc && tsc -p sdk --noEmit"
   },
   "type": "module",
   "dependencies": {
