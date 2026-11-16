@@ -11,6 +11,7 @@ const PROCESSES_HELP = "processes: a whole number from 16, for example 1024";
 const DISK_HELP = "disk: megabytes, a whole number from 1, for example 20480";
 const WAIT_HELP = "wait: seconds to wait for free memory, a whole number from 0 to 300";
 const PATH_HELP = "path: an absolute folder path, for example /root/project";
+const RUNTIME_HELP = "runtime: an engine of this machine, for example runsc (GET /info lists them)";
 
 const Problem = z.object({ error: z.string() }).openapi("Error");
 const Id = z.string().regex(/^[0-9a-f]{12}$/).openapi({ example: "3f9a2c7d1e4b" });
@@ -22,19 +23,25 @@ const Sandbox = z
   .object({
     id: Id,
     state: State,
+    runtime: z.string().openapi({ example: "runc" }),
     memory: limit("Megabytes"),
     cpus: limit("CPUs"),
     processes: limit("Processes and threads"),
-    disk: limit("Megabytes; recorded on every engine, enforced on runsc once gVisor lands"),
+    disk: limit("Megabytes; enforced on runsc, only recorded on runc"),
   })
   .openapi("Sandbox");
 const whole = (help: string, min: number) => z.number({ error: help }).int({ error: help }).min(min, { error: help });
 const NewSandbox = z.object({
   image: z.string({ error: IMAGE_HELP }).min(1, { error: IMAGE_HELP }).optional().openapi({ example: "debian:trixie-slim" }),
+  runtime: z
+    .string({ error: RUNTIME_HELP })
+    .min(1, { error: RUNTIME_HELP })
+    .optional()
+    .openapi({ description: "The engine, runc by default (PARPAING_RUNTIME). GET /info lists this machine's engines", example: "runsc" }),
   memory: whole(MEMORY_HELP, 16).optional().openapi({ description: "Megabytes, 1024 by default (PARPAING_MEMORY)", example: 2048 }),
   cpus: z.number({ error: CPUS_HELP }).min(0.01, { error: CPUS_HELP }).optional().openapi({ description: "1 by default (PARPAING_CPUS)", example: 2 }),
   processes: whole(PROCESSES_HELP, 16).optional().openapi({ description: "1024 by default (PARPAING_PROCESSES)", example: 1024 }),
-  disk: whole(DISK_HELP, 1).optional().openapi({ description: "Megabytes, 10240 by default (PARPAING_DISK)", example: 20480 }),
+  disk: whole(DISK_HELP, 1).optional().openapi({ description: "Megabytes, 10240 by default (PARPAING_DISK). Enforced on runsc only", example: 20480 }),
   wait: whole(WAIT_HELP, 0).max(300, { error: WAIT_HELP }).optional().openapi({ description: "Seconds to wait if the machine lacks free memory, 0 by default", example: 30 }),
 });
 const Folder = z.object({ path: z.string({ error: PATH_HELP }).startsWith("/", { error: PATH_HELP }).openapi({ example: "/root/project" }) });
@@ -72,11 +79,11 @@ export const createSandbox = createRoute({
   summary: "Create a sandbox",
   tags: ["Sandboxes"],
   description:
-    "Starts a container from the image, debian:trixie-slim when none is given. A missing image is downloaded first. Memory, CPUs and processes are ceilings, not reservations. The sandbox finds its limits in its environment (PARPAING_MEMORY_MB, PARPAING_CPUS, PARPAING_PROCESSES, PARPAING_DISK_MB).",
+    "Starts a container from the image, debian:trixie-slim when none is given. A missing image is downloaded first. Memory, CPUs, processes and disk are ceilings, not reservations; the disk limit holds on runsc only. The sandbox finds its limits in its environment (PARPAING_MEMORY_MB, PARPAING_CPUS, PARPAING_PROCESSES, PARPAING_DISK_MB).",
   request: body(NewSandbox),
   responses: {
     201: json(Sandbox, "The sandbox, running"),
-    400: json(Problem, "An image Docker cannot use, or a limit the machine cannot give"),
+    400: json(Problem, "An image Docker cannot use, an engine this machine lacks, or a limit it cannot give"),
     415: NOT_JSON,
     503: json(Problem, "Not enough free memory on the machine, even after waiting"),
   },
