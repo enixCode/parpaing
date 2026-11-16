@@ -222,14 +222,14 @@ function print(text, className) {
   $("term").scrollTop = $("term").scrollHeight;
 }
 
-// The typed line goes to sh -c as is. The output shows up as the JSON lines arrive;
+// The typed line goes to sh -c as is, with stream: true. The output shows up as the JSON lines arrive;
 // the drawer keeps those raw lines.
 $("exec").onsubmit = async (event) => {
   event.preventDefault();
   const typed = $("cmd").value.trim();
   if (!typed || !chosen) return;
   const path = `/sandboxes/${chosen}/exec`;
-  const body = { cmd: ["sh", "-c", typed] };
+  const body = { cmd: ["sh", "-c", typed], stream: true };
   const btn = $("exec-btn");
   running = true;
   ready();

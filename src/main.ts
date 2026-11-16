@@ -57,11 +57,25 @@ app.openapi(routes.getSandbox, async (c) => {
 
 app.openapi(routes.deleteSandbox, async (c) => ((await sandboxes.remove(c.req.valid("param").id)) ? c.body(null, 204) : c.json(UNKNOWN, 404)));
 
-// Runs a command and streams its output live: one JSON line per chunk, then its exit code.
-// Refusals (400, 404, 409) come before any line; a client that leaves does not stop it.
+// Runs a command. By default, one JSON answer when it ends: its exit code, stdout and stderr, each cut past 10 MB (then
+// truncated is true) so a command printing gigabytes cannot fill parpaing's memory. With stream: true, the output goes live:
+// one JSON line per chunk, then the exit code. Refusals (400, 404, 409) come first; a client that leaves does not stop the command.
+const MAX_OUTPUT = 10 * 1024 * 1024;
 app.openapi(routes.runCommand, async (c) => {
+  const { cmd, stream: live = false } = c.req.valid("json");
   const container = await sandboxes.running(c.req.valid("param").id);
-  const follow = await startCommand(container, c.req.valid("json").cmd);
+  const follow = await startCommand(container, cmd);
+
+  if (!live) {
+    const output = { stdout: "", stderr: "" };
+    let truncated = false;
+    const exitCode = await follow((name, data) => {
+      const room = MAX_OUTPUT - output[name].length;
+      if (data.length > room) truncated = true;
+      output[name] += data.slice(0, Math.max(room, 0));
+    });
+    return c.json({ exitCode, ...output, truncated }, 200);
+  }
 
   c.header("content-type", "application/x-ndjson");
   const line = (value: unknown) => JSON.stringify(value) + "\n";

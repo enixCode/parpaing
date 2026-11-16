@@ -20,7 +20,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 1 | Create, list, read, remove | `POST /sandboxes`, `GET /sandboxes`, `GET /sandboxes/:id`, `DELETE /sandboxes/:id` | < 1.0.0 | 🟢 Done |
 | 2 | Any image | Pulled on first use, `debian:trixie-slim` by default | < 1.0.0 | 🟢 Done |
 | 3 | Clear image errors | 400 with Docker's reason (not found, private, misspelled) | < 1.0.0 | 🟢 Done |
-| 4 | Run a command | `POST /sandboxes/:id/exec`: live output, then the exit code | < 1.0.0 | 🟢 Done |
+| 4 | Run a command | `POST /sandboxes/:id/exec`, with `stream: true` for live output, then the exit code | < 1.0.0 | 🟢 Done |
 | 5 | Info | `GET /info`: version, engines, capacity, sandbox count, for a central server | < 1.0.0 | 🟢 Done |
 | 6 | This machine only | Port on `127.0.0.1` by default, `PARPAING_ADDRESS` opens it | < 1.0.0 | 🟢 Done |
 | 7 | Own containers only | Touches only containers labelled `parpaing.sandbox` | < 1.0.0 | 🟢 Done |
@@ -34,7 +34,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 15 | Back after a restart | Sandboxes start again with the machine, with their files but not their processes | < 1.0.0 | 🟢 Done |
 | 16 | Network isolation | Each sandbox alone in an internal network: no host, no local network, no metadata, no other sandboxes. `network: none` cuts everything | < 1.0.0 | 🟢 Done |
 | 17 | Egress proxy | Internet only through a proxy (GOST): HTTP, HTTPS, SOCKS5, ssh | < 1.0.0 | 🟢 Done |
-| 18 | Result in one answer | The whole output and the exit code in one JSON | < 1.0.0 | ⚪ Planned |
+| 18 | Result in one answer | By default, `exec` answers once: exit code, stdout and stderr, each cut past 10 MB | < 1.0.0 | 🟢 Done |
 | 19 | Archives | `GET` and `PUT /sandboxes/:id/archive?path=`: a folder out as a tar, a tar back into a folder, made by the sandbox's own `tar` so it works the same on every engine | < 1.0.0 | 🟢 Done |
 | 20 | gVisor (runsc) | Stronger isolation: `runtime` per sandbox, `PARPAING_RUNTIME` for the default | < 1.0.0 | 🟢 Done |
 | 21 | Disk limit | Per sandbox on runsc, set by parpaing at creation; runc and Kata only record it | < 1.0.0 | 🟢 Done |
