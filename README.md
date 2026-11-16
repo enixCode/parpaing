@@ -105,4 +105,4 @@ Planned for 1.x, see the [roadmap](ROADMAP.md).
 
 ## License
 
-[AGPL-3.0](LICENSE)
+The server: [AGPL-3.0](LICENSE). The SDK: [Apache-2.0](sdk/LICENSE).
