@@ -11,6 +11,8 @@ services:
     environment:
       # Optional: when set, every API call needs Authorization: Bearer <key>.
       - PARPAING_API_KEY
+      # Optional: the engine of a sandbox that asks for none (runc). runsc (gVisor) once installed in Docker, see README.
+      - PARPAING_RUNTIME
       # Optional: default ceilings per sandbox (memory and disk in MB): 1024, 1, 1024, 10240.
       - PARPAING_MEMORY
       - PARPAING_CPUS

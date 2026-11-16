@@ -1,6 +1,7 @@
 // Sandboxes: one Docker container each, recognized by its parpaing.sandbox label. Docker keeps
 // everything, this file holds no state.
 import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import Docker from "dockerode";
 
@@ -24,10 +25,12 @@ const DEFAULTS: Limits = {
   processes: setting("PARPAING_PROCESSES", 1024),
   disk: setting("PARPAING_DISK", 10240),
 };
+// The engine a sandbox gets when the request names none: runc, or runsc (gVisor) on a production machine.
+const RUNTIME = process.env.PARPAING_RUNTIME || "runc";
 // Free memory kept for the system, Docker and parpaing: under it, no new sandbox.
 const RESERVED = setting("PARPAING_RESERVED_MEMORY", 512);
 const MB = 1024 * 1024;
-// The disk limit is recorded on every engine; runc cannot enforce it without host setup, runsc will with its own size.
+// The disk limit is recorded on every engine; runsc enforces it (see create), runc and Kata cannot without host setup.
 const DISK_LABEL = "parpaing.disk";
 
 // The machine's free memory. parpaing's own container has no memory limit, so /proc/meminfo shows the host's.
@@ -38,16 +41,19 @@ function memoryAvailable() {
 
 export const clientError = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
-// A limit cannot exceed the machine. Under the reserve of free memory, a new sandbox waits, checked every second
-// for up to `wait` seconds, then is refused.
-async function fits(limits: Limits, wait: number) {
+// The engine must be one Docker knows, and a limit cannot exceed the machine. Under the reserve of free memory, a new sandbox
+// waits, checked every second for up to `wait` seconds, then is refused. Answers whether the engine is gVisor.
+async function fits(limits: Limits, runtime: string, wait: number) {
   const host = await docker.info();
+  const engines: Record<string, { path: string }> = host.Runtimes ?? {};
+  if (!engines[runtime]) throw clientError(`runtime: one of ${Object.keys(engines).join(", ")} on this machine`);
   if (limits.memory * MB > host.MemTotal) throw clientError(`memory: at most ${Math.floor(host.MemTotal / MB)} MB on this machine`);
   if (limits.cpus > host.NCPU) throw clientError(`cpus: at most ${host.NCPU} on this machine`);
   for (let waited = 0; memoryAvailable() < RESERVED * MB; waited++) {
     if (waited >= wait) throw clientError(`not enough free memory on this machine (reserve: ${RESERVED} MB); try again later, or ask to wait with "wait"`, 503);
     await sleep(1000);
   }
+  return basename(engines[runtime].path) === "runsc";
 }
 
 const stateOf = (running: boolean): "running" | "stopped" => (running ? "running" : "stopped");
@@ -68,10 +74,10 @@ async function pull(image: string) {
 const imageError = (image: string, error: Error) =>
   Object.assign(new Error(`image ${image}: ${error.message.replace(/^\(HTTP code \d+\)[^-]*- /, "").trim()}`), { statusCode: 400 });
 
-export async function create({ image = IMAGE, wait = 0, ...asked }: { image?: string; wait?: number } & Partial<Limits>) {
+export async function create({ image = IMAGE, wait = 0, runtime = RUNTIME, ...asked }: { image?: string; wait?: number; runtime?: string } & Partial<Limits>) {
   const limits = { ...DEFAULTS };
   for (const [key, value] of Object.entries(asked)) if (value !== undefined) limits[key as keyof Limits] = value;
-  await fits(limits, wait);
+  const gvisor = await fits(limits, runtime, wait);
   // sleep infinity does nothing and never ends: the container stays on.
   const options = {
     Image: image,
@@ -80,6 +86,7 @@ export async function create({ image = IMAGE, wait = 0, ...asked }: { image?: st
     // The agent reads its limits with env: on runc, nproc, free and df show the whole machine.
     Env: [`PARPAING_MEMORY_MB=${limits.memory}`, `PARPAING_CPUS=${limits.cpus}`, `PARPAING_PROCESSES=${limits.processes}`, `PARPAING_DISK_MB=${limits.disk}`],
     HostConfig: {
+      Runtime: runtime,
       CapDrop: ["ALL"],
       CapAdd: CAPABILITIES,
       // No swap: past its memory, the kernel kills a process of this sandbox, and only of this one.
@@ -91,6 +98,9 @@ export async function create({ image = IMAGE, wait = 0, ...asked }: { image?: st
       OomScoreAdj: 500,
       // Back after a restart of the machine or of Docker, with its files but without the processes it ran.
       RestartPolicy: { Name: "unless-stopped" },
+      // gVisor keeps what the sandbox writes in its own overlay and stops it at this size. overlay2 is one of the runsc settings a
+      // container may set by annotation, with no change to the runtime's config; runc and Kata ignore the annotation.
+      ...(gvisor && { Annotations: { "dev.gvisor.flag.overlay2": `root:self,size=${limits.disk}m` } }),
     },
   };
   const container = await docker.createContainer(options).catch(async (error) => {
@@ -106,7 +116,7 @@ export async function create({ image = IMAGE, wait = 0, ...asked }: { image?: st
     await container.remove({ force: true });
     throw error.statusCode === 400 ? imageError(image, error) : error;
   });
-  return { id: shortId(container.id), state: stateOf(true), ...limits };
+  return { id: shortId(container.id), state: stateOf(true), runtime, ...limits };
 }
 
 export const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -159,6 +169,7 @@ export async function get(id: string) {
   return {
     id,
     state: stateOf(found.running),
+    runtime: host.Runtime ?? "runc",
     memory: or((host.Memory ?? 0) / MB),
     cpus: or((host.NanoCpus ?? 0) / 1e9),
     processes: or(host.PidsLimit),

@@ -7,6 +7,9 @@ import { after, describe, test } from "node:test";
 
 const BASE = process.env.PARPAING_URL ?? "http://127.0.0.1:8090";
 const KEY = process.env.PARPAING_API_KEY;
+// The engine parpaing gives by default; CI runs the suite once on runc, once on runsc (gVisor).
+const RUNTIME = process.env.PARPAING_RUNTIME || "runc";
+const GVISOR = RUNTIME === "runsc";
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const created: string[] = [];
 
@@ -88,8 +91,8 @@ describe("limits", () => {
     assert.equal(res.status, 201);
     created.push(res.data.id);
     assert.deepEqual(
-      { memory: res.data.memory, cpus: res.data.cpus, processes: res.data.processes, disk: res.data.disk },
-      { memory: 1024, cpus: 1, processes: 1024, disk: 10240 },
+      { runtime: res.data.runtime, memory: res.data.memory, cpus: res.data.cpus, processes: res.data.processes, disk: res.data.disk },
+      { runtime: RUNTIME, memory: 1024, cpus: 1, processes: 1024, disk: 10240 },
     );
   });
 
@@ -98,27 +101,47 @@ describe("limits", () => {
     assert.equal(res.status, 201);
     const { id } = res.data;
     created.push(id);
-    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
-    const inside = await exec(id, ["sh", "-c", "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/pids.max; env | grep ^PARPAING_ | sort"]);
-    assert.deepEqual(stdout(inside.text).trim().split("\n"), [
-      String(256 * 1024 * 1024),
-      "50000 100000",
-      "100",
+    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", runtime: RUNTIME, memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
+    const env = await exec(id, ["sh", "-c", "env | grep ^PARPAING_ | sort"]);
+    assert.deepEqual(stdout(env.text).trim().split("\n"), [
       "PARPAING_CPUS=0.5",
       "PARPAING_DISK_MB=2048",
       "PARPAING_MEMORY_MB=256",
       "PARPAING_PROCESSES=100",
     ]);
+    // runc shows the host's cgroup files; gVisor has its own, and shows the memory limit in free instead.
+    const cgroup = GVISOR ? "grep MemTotal /proc/meminfo | tr -s ' '" : "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/pids.max";
+    const kernel = stdout((await exec(id, ["sh", "-c", cgroup])).text).trim().split("\n");
+    assert.deepEqual(kernel, GVISOR ? [`MemTotal: ${256 * 1024} kB`] : [String(256 * 1024 * 1024), "50000 100000", "100"]);
   });
 
-  test("past its memory, a process of the sandbox is killed and the sandbox lives on", async () => {
+  test("past its memory, the command is killed", async () => {
     const res = await api("POST", "/sandboxes", { memory: 64 });
     const { id } = res.data;
     created.push(id);
     // tail keeps the last lines of an endless input without newlines: its memory grows until the kernel stops it.
     const run = await exec(id, ["sh", "-c", "tail /dev/zero"]);
-    assert.deepEqual(lines(run.text).at(-1), { exitCode: 137 });
-    assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
+    assert.notDeepEqual(lines(run.text).at(-1), { exitCode: 0 });
+    // runc kills one process and the sandbox lives on; gVisor stops the whole sandbox, which Docker then starts again.
+    if (!GVISOR) {
+      assert.deepEqual(lines(run.text).at(-1), { exitCode: 137 });
+      assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
+    }
+  });
+
+  test("the disk limit holds on runsc", { skip: GVISOR ? false : "runc cannot enforce it without host setup" }, async () => {
+    const res = await api("POST", "/sandboxes", { disk: 100 });
+    const { id } = res.data;
+    created.push(id);
+    const run = await exec(id, ["sh", "-c", "dd if=/dev/zero of=/big bs=1M count=300; ls -l /big"]);
+    assert.match(run.text, /No space left on device/);
+    assert.match(stdout(run.text), / 104857600 /);
+  });
+
+  test("refuses an engine this machine lacks, listing those it has", async () => {
+    const res = await api("POST", "/sandboxes", { runtime: "nope" });
+    assert.equal(res.status, 400);
+    assert.match(res.data.error, /^runtime: one of .*runc.* on this machine$/);
   });
 
   test("refuses limits that are not numbers in range, with an example", async () => {

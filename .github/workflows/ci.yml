@@ -1,4 +1,5 @@
-# CI: type check, build both images with compose, then run the API tests (tests/) without an API key, with one, and on a full machine.
+# CI: type check, build both images with compose, then run the API tests (tests/) without an API key, with one, and on a full machine;
+# then the same tests with gVisor (runsc) as the engine.
 name: ci
 
 on:
@@ -51,6 +52,46 @@ jobs:
           PARPAING_RESERVED_MEMORY=99999999 docker compose up -d parpaing
           timeout 60 sh -c "until curl -fsS $API/info >/dev/null; do sleep 2; done"
           PARPAING_TEST_SATURATED=1 node --test tests/saturated.test.ts
+
+      - name: Logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop
+        if: always()
+        run: docker compose down
+
+  gvisor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API: http://127.0.0.1:8090
+      PARPAING_RUNTIME: runsc
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      # The official install: the release archive checked by its SHA-512, then runsc registers itself in Docker's daemon.json.
+      - name: Install gVisor
+        run: |
+          URL=https://storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)
+          wget -q "$URL/gvisor.tar.zstd" "$URL/gvisor.tar.zstd.sha512"
+          sha512sum -c gvisor.tar.zstd.sha512
+          sudo tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin
+          sudo /usr/local/bin/runsc install
+          sudo systemctl restart docker
+
+      - name: Build and start
+        run: docker compose up -d --build
+
+      - name: Wait for the API
+        run: timeout 60 sh -c "until curl -fsS $API/info; do sleep 2; done"
+
+      - name: Test on runsc
+        run: npm test
 
       - name: Logs
         if: failure()
