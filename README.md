@@ -34,6 +34,7 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back, streamed (tested with 3 GB). The image needs `tar` | 🟢 Done |
 | API key | `Authorization: Bearer <key>` | Optional, with `PARPAING_API_KEY` | 🟢 Done |
 | Limits | `POST /sandboxes` + `memory`, `cpus`, `processes`, `disk`, `wait` | Ceilings per sandbox, readable inside with `env`. Disk: enforced on gVisor only | 🟢 Done |
+| Network | `POST /sandboxes` + `network` | `internet` through the egress proxy (HTTP, HTTPS, SOCKS5, ssh), or `none` | 🟢 Done |
 | Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor), `PARPAING_RUNTIME` for the default | 🟢 Done |
 
 🟢 Done: works today, can still change before 1.0.0. 🟡 In progress: being built. ⚪ Planned: not started.
@@ -77,8 +78,9 @@ Planned for 1.x, see the [roadmap](ROADMAP.md).
 
 - **A sandbox is a Docker container** labelled `parpaing.sandbox`. Parpaing never touches other containers.
 - **Always on**: the container runs `sleep infinity` and waits for commands. It starts again with Docker, with its files but not its processes.
+- **Its own network**: each sandbox sits alone in an internal network. Its only way out is the egress proxy (GOST), which refuses the host, the local network, cloud metadata and other sandboxes. Programs find it in `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`; ssh with `-o ProxyCommand='nc -X connect -x $PARPAING_PROXY %h %p'`. Programs that ignore proxies (`psql`) need `proxychains` or an ssh tunnel.
 - **No state in Parpaing**: Docker keeps everything.
-- **One port**: the `gateway` container (nginx) serves the web page and the brand kit, and relays the API. The `parpaing` container also works alone, without the page.
+- **One port**: the `gateway` container (nginx) serves the web page and the brand kit, and relays the API. The `parpaing` container also works without the page; sandboxes with internet need the `egress` container.
 
 ## Services
 
