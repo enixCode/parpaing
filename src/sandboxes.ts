@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import Docker from "dockerode";
+import { createNetwork, NETWORK_LABEL, proxyEnv, removeNetwork } from "./network.ts";
 
 const docker = new Docker();
 const LABEL = "parpaing.sandbox";
@@ -74,19 +75,34 @@ async function pull(image: string) {
 const imageError = (image: string, error: Error) =>
   Object.assign(new Error(`image ${image}: ${error.message.replace(/^\(HTTP code \d+\)[^-]*- /, "").trim()}`), { statusCode: 400 });
 
-export async function create({ image = IMAGE, wait = 0, runtime = RUNTIME, ...asked }: { image?: string; wait?: number; runtime?: string } & Partial<Limits>) {
+export async function create({
+  image = IMAGE,
+  wait = 0,
+  runtime = RUNTIME,
+  network = "internet",
+  ...asked
+}: { image?: string; wait?: number; runtime?: string; network?: "internet" | "none" } & Partial<Limits>) {
   const limits = { ...DEFAULTS };
   for (const [key, value] of Object.entries(asked)) if (value !== undefined) limits[key as keyof Limits] = value;
   const gvisor = await fits(limits, runtime, wait);
+  // Internet goes through the egress proxy only, from the sandbox's own network; "none" gives no network at all.
+  const net = network === "none" ? undefined : await createNetwork();
   // sleep infinity does nothing and never ends: the container stays on.
   const options = {
     Image: image,
     Entrypoint: ["sleep", "infinity"],
-    Labels: { [LABEL]: "", [DISK_LABEL]: String(limits.disk) },
+    Labels: { [LABEL]: "", [DISK_LABEL]: String(limits.disk), [NETWORK_LABEL]: net?.name ?? "none" },
     // The agent reads its limits with env: on runc, nproc, free and df show the whole machine.
-    Env: [`PARPAING_MEMORY_MB=${limits.memory}`, `PARPAING_CPUS=${limits.cpus}`, `PARPAING_PROCESSES=${limits.processes}`, `PARPAING_DISK_MB=${limits.disk}`],
+    Env: [
+      `PARPAING_MEMORY_MB=${limits.memory}`,
+      `PARPAING_CPUS=${limits.cpus}`,
+      `PARPAING_PROCESSES=${limits.processes}`,
+      `PARPAING_DISK_MB=${limits.disk}`,
+      ...(net ? proxyEnv(net.proxy) : []),
+    ],
     HostConfig: {
       Runtime: runtime,
+      NetworkMode: net?.name ?? "none",
       CapDrop: ["ALL"],
       CapAdd: CAPABILITIES,
       // No swap: past its memory, the kernel kills a process of this sandbox, and only of this one.
@@ -103,20 +119,25 @@ export async function create({ image = IMAGE, wait = 0, runtime = RUNTIME, ...as
       ...(gvisor && { Annotations: { "dev.gvisor.flag.overlay2": `root:self,size=${limits.disk}m` } }),
     },
   };
-  const container = await docker.createContainer(options).catch(async (error) => {
-    if (error.statusCode === 400) throw imageError(image, error);
-    if (error.statusCode !== 404) throw error;
-    await pull(image).catch((error) => {
-      throw imageError(image, error);
+  try {
+    const container = await docker.createContainer(options).catch(async (error) => {
+      if (error.statusCode === 400) throw imageError(image, error);
+      if (error.statusCode !== 404) throw error;
+      await pull(image).catch((error) => {
+        throw imageError(image, error);
+      });
+      return docker.createContainer(options);
     });
-    return docker.createContainer(options);
-  });
-  // An image without sleep does not start: the failed container is removed.
-  await container.start().catch(async (error) => {
-    await container.remove({ force: true });
-    throw error.statusCode === 400 ? imageError(image, error) : error;
-  });
-  return { id: shortId(container.id), state: stateOf(true), runtime, ...limits };
+    // An image without sleep does not start: the failed container is removed.
+    await container.start().catch(async (error) => {
+      await container.remove({ force: true });
+      throw error.statusCode === 400 ? imageError(image, error) : error;
+    });
+    return { id: shortId(container.id), state: stateOf(true), runtime, network, ...limits };
+  } catch (error) {
+    if (net) await removeNetwork(net.name);
+    throw error;
+  }
 }
 
 export const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -170,6 +191,7 @@ export async function get(id: string) {
     id,
     state: stateOf(found.running),
     runtime: host.Runtime ?? "runc",
+    network: config.Labels?.[NETWORK_LABEL] === "none" ? ("none" as const) : ("internet" as const),
     memory: or((host.Memory ?? 0) / MB),
     cpus: or((host.NanoCpus ?? 0) / 1e9),
     processes: or(host.PidsLimit),
@@ -182,5 +204,7 @@ export async function remove(id: string) {
   const found = await find(id);
   if (!found) return false;
   await found.container.remove({ force: true });
+  const network = found.info.Config.Labels?.[NETWORK_LABEL];
+  if (network && network !== "none") await removeNetwork(network);
   return true;
 }

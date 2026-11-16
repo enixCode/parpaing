@@ -1,0 +1,17 @@
+# One port for HTTP (plain and CONNECT, any port: ssh, databases) and SOCKS5. GOST resolves names itself over DNS-over-TLS
+# to public resolvers: the machine's resolver is often a private address, which egress.sh refuses.
+services:
+  - name: egress
+    addr: ":3128"
+    resolver: public
+    handler:
+      type: auto
+    listener:
+      type: tcp
+resolvers:
+  - name: public
+    nameservers:
+      - addr: tls://1.1.1.1:853
+        prefer: ipv4
+      - addr: tls://9.9.9.9:853
+        prefer: ipv4

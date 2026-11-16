@@ -1,7 +1,8 @@
-# Only what the two images need goes to the Docker build.
+# Only what the three images need goes to the Docker build.
 *
 !package.json
 !package-lock.json
 !src
 !gateway
+!egress
 !docs/brand
