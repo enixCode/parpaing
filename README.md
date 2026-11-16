@@ -41,7 +41,7 @@ See the details in [ROADMAP.md](ROADMAP.md).
 
 ## SDK
 
-TypeScript, no dependency (Node 18+, Deno, Bun, browsers), in [sdk/](sdk/). Not on npm yet.
+TypeScript, no dependency (Node 18+, Deno, Bun, browsers): `npm install parpaing`. Source in [sdk/](sdk/).
 
 ```ts
 import { Parpaing } from "parpaing";
