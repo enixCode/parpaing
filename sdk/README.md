@@ -31,3 +31,7 @@ await parpaing.delete(id);
 - **`image`**: any image Docker can pull, `debian:trixie-slim` by default: `node:24`, `user/image:tag`, `ghcr.io/owner/image:tag`.
 - **Refusals** throw a `ParpaingError` with the API's `status` and message.
 - **`signal`** on `exec` stops waiting, not the command.
+
+## License
+
+[Apache-2.0](LICENSE). The parpaing server is AGPL-3.0.
