@@ -32,8 +32,8 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 13 | Hardening | Root in the sandbox (apt, pip work), with only 9 capabilities: nothing gets the others back | < 1.0.0 | 🟢 Done |
 | 14 | Limits | Memory, CPU and processes per sandbox: ceilings, not reservations. A new sandbox is refused (or waits) when the machine lacks free memory | < 1.0.0 | 🟢 Done |
 | 15 | Back after a restart | Sandboxes start again with the machine, with their files but not their processes | < 1.0.0 | 🟢 Done |
-| 16 | Network isolation | No local network, no other sandboxes | < 1.0.0 | ⚪ Planned |
-| 17 | Egress proxy | Internet only through a proxy | < 1.0.0 | ⚪ Planned |
+| 16 | Network isolation | Each sandbox alone in an internal network: no host, no local network, no metadata, no other sandboxes. `network: none` cuts everything | < 1.0.0 | 🟢 Done |
+| 17 | Egress proxy | Internet only through a proxy (GOST): HTTP, HTTPS, SOCKS5, ssh | < 1.0.0 | 🟢 Done |
 | 18 | Result in one answer | The whole output and the exit code in one JSON | < 1.0.0 | ⚪ Planned |
 | 19 | Archives | `GET` and `PUT /sandboxes/:id/archive?path=`: a folder out as a tar, a tar back into a folder, made by the sandbox's own `tar` so it works the same on every engine | < 1.0.0 | 🟢 Done |
 | 20 | gVisor (runsc) | Stronger isolation: `runtime` per sandbox, `PARPAING_RUNTIME` for the default | < 1.0.0 | 🟢 Done |

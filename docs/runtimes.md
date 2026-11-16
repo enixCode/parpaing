@@ -21,7 +21,7 @@ Each sandbox runs with an engine (an OCI runtime), chosen with `runtime` or `PAR
 | Memory and CPU limits | ✅ | ✅ | ❓ | runsc: free shows the memory limit; past its memory, the whole sandbox stops (Docker starts it again), not one process. Kata: the limits apply inside the virtual machine, which costs ~150 to 300 MB more |
 | Process limit | ✅ | ❓ | ❓ | runsc: the limit also counts gVisor's own threads. A thread bomb without a memory cap froze the test VM: to test again with parpaing's memory cap |
 | Back after a restart | ✅ | ❓ | ❓ | Docker restarts the sandbox on every engine. runsc: files written outside volumes live in gVisor's overlay and are probably lost |
-| Network isolation, egress proxy | ❓ | ❓ | ❓ | gVisor has its own network stack |
+| Network isolation, egress proxy | ✅ | ✅ | ❓ | One internal network per sandbox, the egress proxy as the only way out: nothing depends on the engine |
 | Stop a command | ❓ | ❓ | ❓ | Stops the command and everything it started |
 | Archives | ✅ | ✅ | ❓ | The sandbox's own `tar` runs through exec |
 | Stop and start | ❓ | ❓ | ❓ | |
