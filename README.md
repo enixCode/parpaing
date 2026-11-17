@@ -108,6 +108,7 @@ Planned for 1.x, see the [roadmap](ROADMAP.md).
 
 - **Issues are welcome**: bugs, questions, ideas. [Open one](https://github.com/enixCode/parpaing/issues).
 - **No pull requests for now.**
+- **Running and testing it from the source**: [DEV.md](DEV.md).
 
 ## License
 
