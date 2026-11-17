@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, describe, test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const BASE = process.env.PARPAING_URL ?? "http://127.0.0.1:8090";
 const KEY = process.env.PARPAING_API_KEY;
@@ -84,6 +85,42 @@ describe("sandboxes", () => {
       assert.equal(res.status, 404);
       assert.deepEqual(res.data, { error: "unknown sandbox" });
     }
+  });
+});
+
+describe("daemon", () => {
+  test("is PID 1, and runs images without a shell or sleep", async () => {
+    const id = await newSandbox();
+    assert.equal((await exec(id, ["sh", "-c", "tr '\\0' ' ' </proc/1/cmdline"])).data.stdout, "/.parpaing/parpaingd ");
+    const bare = await api("POST", "/sandboxes", { image: "hello-world" });
+    assert.equal(bare.status, 201);
+    created.push(bare.data.id);
+    assert.equal((await api("GET", `/sandboxes/${bare.data.id}`)).data.state, "running");
+  });
+
+  test("collects the processes left behind", async () => {
+    const id = await newSandbox();
+    // Each subshell ends at once: its sleep goes to PID 1, and is a zombie once it ends unless PID 1 collects it.
+    for (let i = 0; i < 10; i++) await exec(id, ["sh", "-c", "(sleep 0.2 &); true"]);
+    const count = ["sh", "-c", "grep -l '^State:.Z' /proc/[0-9]*/status 2>/dev/null | wc -l"];
+    let zombies = "";
+    for (let tries = 0; tries < 20 && zombies !== "0"; tries++) {
+      await sleep(500);
+      zombies = (await exec(id, count)).data.stdout.trim();
+    }
+    assert.equal(zombies, "0");
+  });
+
+  test("cannot be ended from inside", async () => {
+    const id = await newSandbox();
+    // PID 1's start time changes if the sandbox restarts.
+    const started = async () => (await exec(id, ["sh", "-c", "cut -d' ' -f22 /proc/1/stat"])).data.stdout;
+    const before = await started();
+    for (const signal of ["TERM", "INT", "HUP", "QUIT", "USR1"]) await exec(id, ["kill", `-${signal}`, "1"]);
+    await exec(id, ["sh", "-c", "kill -9 -1"]);
+    await sleep(1500);
+    assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
+    assert.equal(await started(), before);
   });
 });
 

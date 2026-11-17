@@ -7,6 +7,7 @@ import { bearerAuth } from "hono/bearer-auth";
 import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { readFolder, writeFolder } from "./archive.ts";
+import { DAEMON_VOLUME, installDaemon } from "./daemon.ts";
 import { startCommand } from "./exec.ts";
 import { followEgress } from "./network.ts";
 import * as routes from "./routes.ts";
@@ -126,6 +127,12 @@ app.onError((error, c) => {
 // compose decides who can reach it: 127.0.0.1 by default, PARPAING_ADDRESS for the network.
 // The egress proxy gets its legs back in every sandbox network now, and whenever it starts again.
 followEgress().catch((error) => console.error(`egress: ${error.message}`));
+
+// Without the daemon in its volume, no sandbox could start: better to stop here with the reason.
+await installDaemon().catch((error) => {
+  console.error(`parpaing: cannot copy the sandbox daemon into the ${DAEMON_VOLUME} volume (mounted at /daemon): ${error.message}`);
+  process.exit(1);
+});
 
 serve({ fetch: app.fetch, hostname: "0.0.0.0", port: 8090 }, () =>
   console.log(`parpaing: sandbox API on port 8090, ${KEY ? "API key required" : "no API key (PARPAING_API_KEY): open to anyone who reaches the port"}`),
