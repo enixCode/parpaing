@@ -44,7 +44,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 25 | Idle stop | Paused after some time without activity | 1.x | ⚪ Planned |
 | 26 | Live resize | More memory or CPU for a running sandbox. To verify on runsc and Kata first | 1.x | ⚪ Planned |
 | 27 | Key rotation | Two keys accepted at once, to change the key without downtime | 1.x | ⚪ Planned |
-| 28 | Sandbox daemon | A small program inside each sandbox, the base of 29 to 33 | 1.x | ⚪ Planned |
+| 28 | Sandbox daemon | `parpaingd`, main process of every sandbox from a read-only volume: any image, processes left behind collected. The base of 29 to 33 | 1.x | 🟡 In progress |
 | 29 | Sessions | A shell that keeps its folder and variables, background commands | 1.x | ⚪ Planned |
 | 30 | Command id | Each command gets an id, through the daemon. A new route: the `exec` stream above stays as it is | 1.x | ⚪ Planned |
 | 31 | Stop a command | By its id, with everything it started | 1.x | ⚪ Planned |
