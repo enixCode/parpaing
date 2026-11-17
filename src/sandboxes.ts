@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import Docker from "dockerode";
+import { DAEMON_DIR, DAEMON_LABEL, DAEMON_PATH, DAEMON_VOLUME } from "./daemon.ts";
 import { createNetwork, NETWORK_LABEL, proxyEnv, removeNetwork } from "./network.ts";
 
 const docker = new Docker();
@@ -70,7 +71,7 @@ async function pull(image: string) {
   });
 }
 
-// An error caused by the image (not found, private, misspelled, no sleep): the API refuses it with a 400
+// An error caused by the image (not found, private, misspelled): the API refuses it with a 400
 // and Docker's message, without its "(HTTP code 404) unexpected - " prefix.
 const imageError = (image: string, error: Error) =>
   Object.assign(new Error(`image ${image}: ${error.message.replace(/^\(HTTP code \d+\)[^-]*- /, "").trim()}`), { statusCode: 400 });
@@ -87,11 +88,11 @@ export async function create({
   const gvisor = await fits(limits, runtime, wait);
   // Internet goes through the egress proxy only, from the sandbox's own network; "none" gives no network at all.
   const net = network === "none" ? undefined : await createNetwork();
-  // sleep infinity does nothing and never ends: the container stays on.
+  // The daemon is the main process, from the read-only parpaing-daemon volume: the container stays on whatever the image holds.
   const options = {
     Image: image,
-    Entrypoint: ["sleep", "infinity"],
-    Labels: { [LABEL]: "", [DISK_LABEL]: String(limits.disk), [NETWORK_LABEL]: net?.name ?? "none" },
+    Entrypoint: [DAEMON_PATH],
+    Labels: { [LABEL]: "", [DISK_LABEL]: String(limits.disk), [NETWORK_LABEL]: net?.name ?? "none", [DAEMON_LABEL]: "1" },
     // The agent reads its limits with env: on runc, nproc, free and df show the whole machine.
     Env: [
       `PARPAING_MEMORY_MB=${limits.memory}`,
@@ -103,6 +104,7 @@ export async function create({
     HostConfig: {
       Runtime: runtime,
       NetworkMode: net?.name ?? "none",
+      Mounts: [{ Type: "volume" as const, Source: DAEMON_VOLUME, Target: DAEMON_DIR, ReadOnly: true }],
       CapDrop: ["ALL"],
       CapAdd: CAPABILITIES,
       // No swap: past its memory, the kernel kills a process of this sandbox, and only of this one.
@@ -128,7 +130,7 @@ export async function create({
       });
       return docker.createContainer(options);
     });
-    // An image without sleep does not start: the failed container is removed.
+    // A container that does not start is removed.
     await container.start().catch(async (error) => {
       await container.remove({ force: true });
       throw error.statusCode === 400 ? imageError(image, error) : error;

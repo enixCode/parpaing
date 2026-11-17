@@ -40,9 +40,20 @@
   <rect x="590" y="107" width="280" height="96" rx="10" fill="#fff" stroke="#6e7891" stroke-width="1.2" stroke-dasharray="5 4"/>
   <text x="730" y="127" text-anchor="middle" class="frame">sandboxes, one internal network each</text>
   <rect x="604" y="139" width="120" height="48" rx="8" class="sbx"/>
-  <text x="664" y="168" text-anchor="middle" class="h">container</text>
+  <text x="664" y="160" text-anchor="middle" class="h">container</text>
+  <text x="664" y="176" text-anchor="middle" class="code">PID 1: parpaingd</text>
   <rect x="736" y="139" width="120" height="48" rx="8" class="sbx"/>
-  <text x="796" y="168" text-anchor="middle" class="h">container</text>
+  <text x="796" y="160" text-anchor="middle" class="h">container</text>
+  <text x="796" y="176" text-anchor="middle" class="code">PID 1: parpaingd</text>
+
+  <!-- The sandbox daemon: parpaing copies it into a volume that every sandbox mounts read-only -->
+  <rect x="504" y="236" width="104" height="52" rx="10" class="ext"/>
+  <text x="556" y="258" text-anchor="middle" class="h">volume</text>
+  <text x="556" y="276" text-anchor="middle" class="code">parpaing-daemon</text>
+  <path d="M480,184 L480,200 L530,200 L530,234" class="http"/>
+  <text x="536" y="220" class="lbl">copy</text>
+  <path d="M596,236 L596,205" class="http"/>
+  <text x="602" y="224" class="lbl">read-only</text>
 
 
   <!-- Clients: everything goes through nginx; the API can also be called directly -->

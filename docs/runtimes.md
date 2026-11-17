@@ -18,6 +18,7 @@ Each sandbox runs with an engine (an OCI runtime), chosen with `runtime` or `PAR
 | Any image | ✅ | ✅ | ❓ | Docker pulls the image before the engine starts: expected the same everywhere |
 | Run a command | ✅ | ✅ | ❓ | |
 | Hardening (9 capabilities) | ✅ | ✅ | ❓ | runsc: the same 9 capabilities (`0x200004fb`), apt and ping work |
+| Daemon as main process | ✅ | ✅ | ❓ | parpaingd from a read-only volume: any image starts, processes left behind are collected, signals from inside do not end it |
 | Memory and CPU limits | ✅ | ✅ | ❓ | runsc: free shows the memory limit; past its memory, the whole sandbox stops (Docker starts it again), not one process. Kata: the limits apply inside the virtual machine, which costs ~150 to 300 MB more |
 | Process limit | ✅ | ✅ | ❓ | The machine stays responsive (tested on a 2 GB VM). runsc: the limit counts gVisor's own threads; one process stops at about 4,000 threads, a fork bomb stops the whole sandbox. The memory cap is what protects the machine: without it, the VM froze |
 | Back after a restart | ✅ | ❌ | ❓ | Docker restarts the sandbox on every engine. runsc: it comes back empty, every file written is lost; save the work with an archive first |

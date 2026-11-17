@@ -2,7 +2,7 @@
 # The images come from ghcr.io. After changing the code, docker compose up -d --build builds them from this folder.
 services:
   parpaing:
-    image: ghcr.io/enixcode/parpaing:1.0.0
+    image: ghcr.io/enixcode/parpaing:1.1.0
     build: .
     container_name: parpaing
     restart: unless-stopped
@@ -24,6 +24,8 @@ services:
       - PARPAING_SUBNETS
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
+      # The sandbox daemon: parpaing copies its binary here at start, every sandbox mounts this volume read-only.
+      - "parpaing-daemon:/daemon"
 
   # The egress proxy (GOST): the only way out for sandboxes, each alone in an internal network. Its kernel refuses private
   # destinations; NET_ADMIN lets it set those rules in its own network namespace, not on the host.
@@ -31,7 +33,7 @@ services:
     build:
       context: .
       dockerfile: egress/Dockerfile
-    image: ghcr.io/enixcode/parpaing-egress:1.0.0
+    image: ghcr.io/enixcode/parpaing-egress:1.1.0
     container_name: parpaing-egress
     restart: unless-stopped
     cap_add:
@@ -42,10 +44,15 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
-    image: ghcr.io/enixcode/parpaing-gateway:1.0.0
+    image: ghcr.io/enixcode/parpaing-gateway:1.1.0
     container_name: parpaing-gateway
     restart: unless-stopped
     depends_on:
       - parpaing
     ports:
       - "${PARPAING_ADDRESS:-127.0.0.1}:8090:80"
+
+volumes:
+  # A fixed name, whatever this compose file's folder: sandboxes mount it by this name.
+  parpaing-daemon:
+    name: parpaing-daemon

@@ -74,9 +74,15 @@ Then ask `"runtime": "runsc"` per sandbox, or set `PARPAING_RUNTIME=runsc` for e
 
 Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 
-## Next: the sandbox daemon
+## The sandbox daemon
 
-A small program inside each sandbox, brought by parpaing, not by the image. It is the base of:
+`parpaingd`, a small program brought by parpaing (not by the image), is the main process of every sandbox, from a read-only volume.
+
+- Any image works, even one without a shell or sleep.
+- Processes left behind are collected, so they never use up the process limit.
+- Signals from inside the sandbox do not end it.
+
+Next, on top of it:
 
 - **Sessions**: a shell that keeps its folder and variables, background commands.
 - **Command id**: each command gets an id.
@@ -89,7 +95,7 @@ Planned for 1.x, see the [roadmap](ROADMAP.md).
 ## How it works
 
 - **A sandbox is a Docker container** labelled `parpaing.sandbox`. Parpaing never touches other containers.
-- **Always on**: the container runs `sleep infinity` and waits for commands. It starts again with Docker, with its files but not its processes.
+- **Always on**: the container runs the parpaing daemon, mounted read-only, and waits for commands: any image works, even one without a shell. It starts again with Docker, with its files but not its processes.
 - **Its own network**: each sandbox sits alone in an internal network. Its only way out is the egress proxy (GOST), which refuses the host, the local network, cloud metadata and other sandboxes. Programs find it in `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`; ssh with `-o ProxyCommand='nc -X connect -x $PARPAING_PROXY %h %p'`. Programs that ignore proxies (`psql`) need `proxychains` or an ssh tunnel.
 - **No state in Parpaing**: Docker keeps everything.
 - **One port**: the `gateway` container (nginx) serves the web page and the brand kit, and relays the API. The `parpaing` container also works without the page; sandboxes with internet need the `egress` container.
