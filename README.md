@@ -81,6 +81,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 - Any image works, even one without a shell or sleep.
 - Processes left behind are collected, so they never use up the process limit.
 - Signals from inside the sandbox do not end it.
+- It answers on a local socket, from inside the sandbox: `/.parpaing/parpaingd ping` gives `{"ok":true,"version":1}`.
 
 Next, on top of it:
 

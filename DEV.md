@@ -59,7 +59,8 @@ docker compose up -d --build parpaing   # rebuilds it; parpaing copies it into t
 ```
 
 - New sandboxes get the new binary; a running one keeps its own until it restarts.
-- In a sandbox: `docker logs <id>` shows `parpaingd ready`; `docker exec <id> cat /proc/1/cmdline` shows the daemon.
+- In a sandbox: `docker logs <id>` shows `parpaingd ready`; `docker exec <id> /.parpaing/parpaingd ping` gives `{"ok":true,"version":1}`.
+- `version` goes up when the daemon gains a command: a running sandbox keeps the daemon it started with.
 
 ## The SDK (sdk/)
 

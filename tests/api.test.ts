@@ -122,6 +122,26 @@ describe("daemon", () => {
     assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
     assert.equal(await started(), before);
   });
+
+  test("answers ping on its local socket, with or without network, even without /tmp", async () => {
+    const offline = await api("POST", "/sandboxes", { network: "none" });
+    assert.equal(offline.status, 201);
+    created.push(offline.data.id);
+    for (const id of [await newSandbox(), offline.data.id]) {
+      const ping = await exec(id, ["sh", "-c", "rm -rf /tmp && /.parpaing/parpaingd ping"]);
+      assert.equal(ping.data.exitCode, 0, ping.data.stderr);
+      assert.deepEqual(JSON.parse(ping.data.stdout), { ok: true, version: 1 });
+    }
+  });
+
+  // A timeout: a second daemon that took the socket would never return.
+  test("a second daemon started inside stops at once, the first keeps answering", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const second = await exec(id, ["/.parpaing/parpaingd"]);
+    assert.equal(second.data.exitCode, 1);
+    assert.match(second.data.stderr, /in use/);
+    assert.equal((await exec(id, ["/.parpaing/parpaingd", "ping"])).data.exitCode, 0);
+  });
 });
 
 describe("limits", () => {
