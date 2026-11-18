@@ -123,12 +123,13 @@ describe("daemon", () => {
     assert.equal(await started(), before);
   });
 
-  test("answers ping on its local socket, with or without network, even without /tmp", async () => {
+  test("answers ping on its local socket, with or without network, even after rm -rf /tmp", async () => {
     const offline = await api("POST", "/sandboxes", { network: "none" });
     assert.equal(offline.status, 201);
     created.push(offline.data.id);
     for (const id of [await newSandbox(), offline.data.id]) {
-      const ping = await exec(id, ["sh", "-c", "rm -rf /tmp && /.parpaing/parpaingd ping"]);
+      // On runsc, /tmp is a mount point: rm empties it and fails on the folder itself.
+      const ping = await exec(id, ["sh", "-c", "rm -rf /tmp; /.parpaing/parpaingd ping"]);
       assert.equal(ping.data.exitCode, 0, ping.data.stderr);
       assert.deepEqual(JSON.parse(ping.data.stdout), { ok: true, version: 1 });
     }
