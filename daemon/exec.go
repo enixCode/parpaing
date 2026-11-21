@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
@@ -40,6 +41,10 @@ const grace = 10 * time.Second
 // Once the current generation of a command's output files holds this much (both streams), the next write starts a new
 // one. Two are kept: at least the last 50 MiB of a command, at most about 100 MiB. A var for the tests.
 var segment int64 = 50 << 20
+
+// The most chunks one generation indexes: a writer that switches streams on every write would otherwise grow the index by
+// one entry per write. A var for the tests.
+var chunkMax = 8192
 
 // Finished commands kept: past it, a start removes the oldest, output included. A var for the tests.
 var keep = 50
@@ -85,6 +90,8 @@ type generation struct {
 	files [2]*os.File
 	sizes [2]int64
 	start int64
+	// Its entries in the index.
+	chunks int
 }
 
 type command struct {
@@ -109,6 +116,9 @@ type command struct {
 // collects: a command that ends at once is already in byPid when its status is collected, never handed to the orphans.
 // Lock order: the table's mu, then a command's mu.
 type table struct {
+	// Drawn once per daemon run and the first 4 hex of every command id: an unknown id that does not start with it was
+	// given by an earlier run, so parpaing can tell a command lost in a sandbox restart from one that never existed.
+	boot     string
 	mu       sync.Mutex
 	commands map[string]*command
 	order    []*command
@@ -116,7 +126,9 @@ type table struct {
 }
 
 func newTable() *table {
-	return &table{commands: map[string]*command{}, byPid: map[int]*command{}}
+	raw := make([]byte, 2)
+	rand.Read(raw)
+	return &table{boot: hex.EncodeToString(raw), commands: map[string]*command{}, byPid: map[int]*command{}}
 }
 
 func answer(w http.ResponseWriter, status int, body any) {
@@ -130,7 +142,7 @@ func (t *table) find(w http.ResponseWriter, r *http.Request) *command {
 	c := t.commands[r.PathValue("id")]
 	t.mu.Unlock()
 	if c == nil {
-		answer(w, http.StatusNotFound, map[string]string{"error": "unknown command"})
+		answer(w, http.StatusNotFound, map[string]string{"error": "unknown command", "boot": t.boot})
 	}
 	return c
 }
@@ -140,7 +152,13 @@ func (t *table) start(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Cmd []string `json:"cmd"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Cmd) == 0 {
+	// The daemon is PID 1: a huge body must not make it the OOM killer's target.
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body)
+	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+		answer(w, http.StatusBadRequest, map[string]string{"error": "the request body is over 1 MiB"})
+		return
+	}
+	if err != nil || len(body.Cmd) == 0 {
 		answer(w, http.StatusBadRequest, map[string]string{"error": `cmd: a command as an array, for example ["ls", "-la"]`})
 		return
 	}
@@ -154,9 +172,9 @@ func (t *table) start(w http.ResponseWriter, r *http.Request) {
 
 // Starts a command and adds it to the table.
 func (t *table) run(args []string) (*command, int, error) {
-	raw := make([]byte, 6)
+	raw := make([]byte, 4)
 	rand.Read(raw)
-	c := &command{id: hex.EncodeToString(raw), cmd: args, changed: make(chan struct{})}
+	c := &command{id: t.boot + hex.EncodeToString(raw), cmd: args, changed: make(chan struct{})}
 	c.dir = filepath.Join(outputDir, c.id)
 	// Read and write ends of the stdout pipe, then of the stderr pipe.
 	var pipes [4]*os.File
@@ -195,7 +213,7 @@ func (t *table) run(args []string) (*command, int, error) {
 		t.mu.Unlock()
 		return failed(http.StatusBadRequest, err)
 	}
-	t.evict()
+	gone := t.evict()
 	c.pid = cmd.Process.Pid
 	t.commands[c.id] = c
 	t.order = append(t.order, c)
@@ -203,6 +221,10 @@ func (t *table) run(args []string) (*command, int, error) {
 	// The reaper collects it, not Wait: Release only frees the handle Go keeps on the process.
 	cmd.Process.Release()
 	t.mu.Unlock()
+	// Outside t.mu: a folder the agent filled with millions of files must not hold the reaper up.
+	for _, dir := range gone {
+		os.RemoveAll(dir)
+	}
 
 	// Only the command holds the write ends now: the pipes end when it and its children close them.
 	pipes[1].Close()
@@ -212,9 +234,10 @@ func (t *table) run(args []string) (*command, int, error) {
 	return c, http.StatusCreated, nil
 }
 
-// Called with t.mu held, at each start: past keep finished commands, the oldest go, output files included. Their readers
-// end with {"next"}, and the next request gets 404. A new order slice: list may still read the old one.
-func (t *table) evict() {
+// Called with t.mu held, at each start: past keep finished commands, the oldest go. Their readers end with {"next"}, and
+// the next request gets 404. Returns their folders, for the caller to remove once t.mu is released. A new order slice:
+// list may still read the old one.
+func (t *table) evict() []string {
 	var done []*command
 	for _, c := range t.order {
 		c.mu.Lock()
@@ -224,8 +247,9 @@ func (t *table) evict() {
 		c.mu.Unlock()
 	}
 	if len(done) <= keep {
-		return
+		return nil
 	}
+	var dirs []string
 	for _, c := range done[:len(done)-keep] {
 		delete(t.commands, c.id)
 		c.mu.Lock()
@@ -235,20 +259,22 @@ func (t *table) evict() {
 		}
 		c.notify()
 		c.mu.Unlock()
-		os.RemoveAll(c.dir)
+		dirs = append(dirs, c.dir)
 	}
 	t.order = slices.DeleteFunc(slices.Clone(t.order), func(c *command) bool { return t.commands[c.id] == nil })
+	return dirs
 }
 
 // New stdout and stderr in dir, for a generation starting at merged position start. Whatever the agent left at those
-// names goes first, and the folder comes back if it removed it.
+// names goes first, and the folder comes back if it removed it. Only a regular file this call creates is used: anything
+// still or again at a name (a FIFO would block the write under c.mu, a symlink would write elsewhere) fails the open.
 func newGeneration(dir string, start int64) (*generation, error) {
 	os.MkdirAll(dir, 0o755)
 	g := &generation{start: start}
 	for _, s := range streams {
 		path := filepath.Join(dir, s.String())
 		os.Remove(path)
-		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
 		if err != nil {
 			g.close()
 			return nil, err
@@ -268,7 +294,8 @@ func (g *generation) close() {
 
 // Called with c.mu held, when the current generation is full: the previous one goes, the current one becomes stdout.1
 // and stderr.1 (its open files stay valid), and new files take the names. If they cannot be created (only the agent can
-// cause it, by breaking its own folder), writing goes on in the current generation and the next write tries again.
+// cause it, by breaking its own folder or putting something at the names), writing goes on in the current generation and
+// the next write tries again.
 func (c *command) rotate() {
 	if len(c.gens) == 2 {
 		old := c.gens[0]
@@ -277,8 +304,8 @@ func (c *command) rotate() {
 			os.Remove(filepath.Join(c.dir, s.String()+".1"))
 		}
 		c.gens = c.gens[1:]
-		// Its chunks lead the index.
-		c.chunks = slices.Delete(c.chunks, 0, sort.Search(len(c.chunks), func(i int) bool { return c.chunks[i].gen != old }))
+		// Its chunks lead the index. A copy, so the array that held them is freed.
+		c.chunks = slices.Clone(c.chunks[sort.Search(len(c.chunks), func(i int) bool { return c.chunks[i].gen != old }):])
 	}
 	for _, s := range streams {
 		os.Rename(filepath.Join(c.dir, s.String()), filepath.Join(c.dir, s.String()+".1"))
@@ -325,7 +352,7 @@ func (c *command) write(s stream, b []byte) {
 	if c.phase == evicted {
 		return
 	}
-	if g := c.gens[len(c.gens)-1]; c.total-g.start >= segment {
+	if g := c.gens[len(c.gens)-1]; c.total-g.start >= segment || g.chunks >= chunkMax {
 		c.rotate()
 	}
 	g := c.gens[len(c.gens)-1]
@@ -340,6 +367,7 @@ func (c *command) write(s stream, b []byte) {
 		c.chunks[last].size += n
 	} else {
 		c.chunks = append(c.chunks, chunk{s, g, g.sizes[s], n, c.total})
+		g.chunks++
 	}
 	g.sizes[s] += n
 	c.total += n
@@ -579,11 +607,17 @@ func (t *table) stop(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// Signals the command's process group, and every process still carrying its PARPAING_EXEC entry: those that left the
-// group. Rescanned on each call, so SIGKILL also reaches what started during the grace delay. Errors (gone, not ours) are
-// ignored.
+// Signals the command's process group while its main process runs, and every process still carrying its PARPAING_EXEC
+// entry: those that left the group, or outlived it. Once the main process is collected its pid, and so its group id, may
+// belong to another command: the group is then left alone. Both checked on each call, so SIGKILL also reaches what started
+// during the grace delay. Errors (gone, not ours) are ignored.
 func (c *command) signal(sig syscall.Signal) {
-	syscall.Kill(-c.pid, sig)
+	c.mu.Lock()
+	alive := c.phase == running
+	c.mu.Unlock()
+	if alive {
+		syscall.Kill(-c.pid, sig)
+	}
 	want := "PARPAING_EXEC=" + c.id
 	entries, _ := os.ReadDir("/proc")
 	for _, e := range entries {

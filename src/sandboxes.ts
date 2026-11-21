@@ -8,7 +8,7 @@ import { DAEMON_DIR, DAEMON_LABEL, DAEMON_PATH, DAEMON_VOLUME } from "./daemon.t
 import { createNetwork, NETWORK_LABEL, proxyEnv, removeNetwork } from "./network.ts";
 
 const docker = new Docker();
-const LABEL = "parpaing.sandbox";
+export const LABEL = "parpaing.sandbox";
 // Image used when the request does not name one.
 const IMAGE = "debian:trixie-slim";
 // The agent is root in its sandbox, so apt and pip work, but root keeps only these powers: files, users, its own

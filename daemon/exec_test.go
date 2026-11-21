@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -293,6 +296,76 @@ func TestRotationRetries(t *testing.T) {
 	}
 }
 
+// Runs f while the daemon can neither remove nor rename anything in c's folder: read-only, the way an agent of the same
+// uid can leave it on a non-root image. As root the test acts as nobody meanwhile, since root ignores the mode.
+func readOnly(t *testing.T, c *command, f func()) {
+	// t.TempDir is 0700: nobody must reach the folder.
+	os.Chmod(filepath.Dir(filepath.Dir(c.dir)), 0o755)
+	os.Chmod(c.dir, 0o555)
+	defer os.Chmod(c.dir, 0o755)
+	if os.Geteuid() == 0 {
+		if err := syscall.Setresuid(-1, 65534, -1); err != nil {
+			t.Fatal(err)
+		}
+		defer syscall.Setresuid(-1, 0, -1)
+	}
+	f()
+}
+
+func TestRotationSkipsFifo(t *testing.T) {
+	cmds := newTable()
+	small(t, 4)
+	c := fake(t, cmds, "ccccccccccc6", piece{stdout, "aaaa"})
+	// The agent puts a FIFO at stdout: written to, it would block once the pipe is full, c.mu held.
+	path := filepath.Join(c.dir, "stdout")
+	os.Remove(path)
+	if err := syscall.Mkfifo(path, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(path, 0o666)
+	// stderr open to nobody too: only the FIFO itself must stop the new generation.
+	os.Chmod(filepath.Join(c.dir, "stderr"), 0o666)
+	big := []byte(strings.Repeat("b", 256*1024))
+	readOnly(t, c, func() {
+		done := make(chan struct{})
+		go func() {
+			c.write(stdout, big)
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the write blocks on the FIFO")
+		}
+	})
+	// No new generation: writing went on in the current one, a regular file.
+	if info, err := c.gens[0].files[stdout].Stat(); len(c.gens) != 1 || c.total != int64(4+len(big)) || err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("%d generations, total %d, %v %v", len(c.gens), c.total, info, err)
+	}
+}
+
+func TestRotationSkipsSymlink(t *testing.T) {
+	cmds := newTable()
+	small(t, 4)
+	c := fake(t, cmds, "ccccccccccc7", piece{stdout, "aaaa"})
+	// The agent points stdout at a file it wants the daemon to overwrite.
+	target := filepath.Join(filepath.Dir(c.dir), "target")
+	os.WriteFile(target, []byte("keep"), 0o666)
+	os.Chmod(target, 0o666)
+	path := filepath.Join(c.dir, "stdout")
+	os.Remove(path)
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	readOnly(t, c, func() { c.write(stdout, []byte("bb")) })
+	if got, _ := os.ReadFile(target); string(got) != "keep" {
+		t.Errorf("target: %q", got)
+	}
+	if len(c.gens) != 1 || c.total != 6 {
+		t.Fatalf("%d generations, total %d", len(c.gens), c.total)
+	}
+}
+
 func TestChunksMerge(t *testing.T) {
 	cmds := newTable()
 	c := fake(t, cmds, "ccccccccccc3")
@@ -303,6 +376,42 @@ func TestChunksMerge(t *testing.T) {
 	c.write(stdout, []byte("a"))
 	if len(c.chunks) != 3 || c.chunks[0].size != 1000 || c.chunks[2].offset != 1000 {
 		t.Fatalf("chunks %v", c.chunks)
+	}
+}
+
+func TestChunkMax(t *testing.T) {
+	old := chunkMax
+	chunkMax = 3
+	t.Cleanup(func() { chunkMax = old })
+	cmds := newTable()
+	c := fake(t, cmds, "ccccccccccc6")
+	// Streams in turn on every write: one chunk per byte, a rotation every 3, the segment never reached.
+	for i := range 10 {
+		c.write(stream(i%2), []byte{byte('0' + i)})
+		if len(c.chunks) > 2*chunkMax {
+			t.Fatalf("write %d: %d chunks", i, len(c.chunks))
+		}
+	}
+	if len(c.gens) != 2 || c.gens[0].start != 6 || len(c.chunks) != 4 {
+		t.Fatalf("%d generations from %d, %d chunks", len(c.gens), c.gens[0].start, len(c.chunks))
+	}
+	_, out := get(t, cmds, c.id, "")
+	if fmt.Sprint(out) != "[map[next:6 skipped:6] map[data:6 next:7 stream:stdout] map[data:7 next:8 stream:stderr] map[data:8 next:9 stream:stdout] map[data:9 next:10 stream:stderr] map[next:10]]" {
+		t.Fatalf("from 0: %v", out)
+	}
+}
+
+func TestStartBodyTooLarge(t *testing.T) {
+	cmds := newTable()
+	// A valid command, past the cap: without it, true would start.
+	body := `{"cmd": ["true"], "x": "` + strings.Repeat("a", 1<<20) + `"}`
+	w := httptest.NewRecorder()
+	cmds.start(w, httptest.NewRequest("POST", "/commands", strings.NewReader(body)))
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "the request body is over 1 MiB") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if len(cmds.order) != 0 {
+		t.Fatalf("%d commands started", len(cmds.order))
 	}
 }
 
@@ -483,5 +592,60 @@ func TestEviction(t *testing.T) {
 	cmds.mu.Unlock()
 	if fmt.Sprint(ids) != fmt.Sprint([]string{started[1].id, started[2].id, last.id}) {
 		t.Errorf("order %v", ids)
+	}
+}
+
+func TestIdsCarryBoot(t *testing.T) {
+	cmds := newTable()
+	hex12 := regexp.MustCompile(`^[0-9a-f]{12}$`)
+	if !regexp.MustCompile(`^[0-9a-f]{4}$`).MatchString(cmds.boot) {
+		t.Fatalf("boot %q", cmds.boot)
+	}
+	c, _, err := cmds.run([]string{"true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			cmds.reap()
+			c.mu.Lock()
+			done := c.phase >= finished
+			c.mu.Unlock()
+			if done {
+				return
+			}
+		}
+	})
+	if !hex12.MatchString(c.id) || !strings.HasPrefix(c.id, cmds.boot) {
+		t.Fatalf("id %q, boot %q", c.id, cmds.boot)
+	}
+	// The 404 of an unknown id tells which run of the daemon answers.
+	if code, out := get(t, cmds, "000000000000", ""); code != 404 || out[0]["error"] != "unknown command" || out[0]["boot"] != cmds.boot {
+		t.Fatalf("unknown: %d %v", code, out)
+	}
+}
+
+func TestStopAfterPidReuse(t *testing.T) {
+	// Another group leader holds the pid of a command already collected.
+	other := exec.Command("sleep", "30")
+	other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() { other.Wait(); close(ended) }()
+	t.Cleanup(func() { other.Process.Kill(); <-ended })
+	for _, p := range []phase{exited, finished} {
+		c := &command{id: "ddddddddddd1", pid: other.Process.Pid, phase: p, changed: make(chan struct{})}
+		c.signal(syscall.SIGKILL)
+		// Waited for, not only Kill(pid, 0): a killed process stays a zombie until collected, and answers it too.
+		select {
+		case <-ended:
+			t.Fatalf("phase %d: the other process was killed", p)
+		case <-time.After(200 * time.Millisecond):
+		}
+		if err := syscall.Kill(other.Process.Pid, 0); err != nil {
+			t.Fatalf("phase %d: %v", p, err)
+		}
 	}
 }

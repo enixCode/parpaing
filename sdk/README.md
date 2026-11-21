@@ -53,9 +53,12 @@ await parpaing.delete(id);
 
 - **`image`**: any image Docker can pull, `debian:trixie-slim` by default: `node:24`, `user/image:tag`, `ghcr.io/owner/image:tag`.
 - **Refusals** throw a `ParpaingError` with the API's `status` and message.
-- **`exec`** resumes by itself after a broken connection.
+- **Errors while reading output**: the `ParpaingError` carries `next`, the position to resume from with `from`.
+- **`exec`** resumes by itself after a network failure or a 5xx answer, never after another error.
+- **`exec` without `onOutput`** keeps at most the last 10 MiB of each stream.
+- **`onOutput` errors** reach the caller unchanged and are not retried.
 - **`output`** resumes where an earlier read stopped with `from: next`; `exitCode` comes once the output is finished.
-- **`skipped`**: the bytes no longer kept, only when a read started before them. A command keeps at least its last 50 MiB of output, at most about 100 MiB.
+- **`skipped`**: the bytes of output not in the result: those the daemon no longer kept, when a read started before them, plus those the SDK dropped. A command keeps at least its last 50 MiB of output, at most about 100 MiB.
 - **`signal`** on `exec` and `output` stops reading, not the command: `stop` ends it.
 
 ## License

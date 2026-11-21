@@ -9,6 +9,7 @@ import { stream } from "hono/streaming";
 import { readFolder, writeFolder } from "./archive.ts";
 import { DAEMON_VOLUME, installDaemon } from "./daemon.ts";
 import { followEgress } from "./network.ts";
+import { followOom } from "./oom.ts";
 import * as commands from "./relay.ts";
 import * as routes from "./routes.ts";
 import { UNKNOWN, UNKNOWN_COMMAND } from "./routes.ts";
@@ -79,7 +80,7 @@ app.openapi(routes.stopCommand, async (c) => {
   return c.json(await commands.stopCommand(id, cid), 202);
 });
 
-// The output goes to the client line by line as the daemon sends it; refusals (400, 404, 409, 503) come before the first
+// The output goes to the client line by line as the daemon sends it; refusals (400, 404, 409, 410, 503) come before the first
 // line. A client that leaves closes the relay, not the command.
 app.openapi(routes.readOutput, async (c) => {
   const { id, cid } = c.req.valid("param");
@@ -129,6 +130,8 @@ app.onError((error, c) => {
 // compose decides who can reach it: 127.0.0.1 by default, PARPAING_ADDRESS for the network.
 // The egress proxy gets its legs back in every sandbox network now, and whenever it starts again.
 followEgress().catch((error) => console.error(`egress: ${error.message}`));
+// The out-of-memory kills of sandboxes, behind the reason of a 410.
+followOom();
 
 // Without the daemon in its volume, no sandbox could start: better to stop here with the reason.
 await installDaemon().catch((error) => {

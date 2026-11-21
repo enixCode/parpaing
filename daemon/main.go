@@ -45,26 +45,27 @@ func main() {
 	// The agent must not end its own sandbox by signalling PID 1: a restart would wipe it on runsc. Linux already drops
 	// these signals for a PID 1 without handlers; catching and dropping them makes it hold on every engine, whatever its
 	// kernel does. Caught, not ignored: exec resets a handler but keeps an ignored signal, and commands must still die on
-	// SIGTERM (stop) and SIGPIPE.
-	signal.Notify(make(chan os.Signal, 1), syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM,
-		syscall.SIGUSR1, syscall.SIGUSR2, syscall.SIGPIPE, syscall.SIGALRM)
+	// SIGTERM (stop) and SIGPIPE. Every signal: Go handles some itself (SIGABRT, SIGSEGV...), and those would otherwise
+	// reach and end PID 1. Faults raised by the daemon itself still panic.
+	signal.Notify(make(chan os.Signal, 1))
 
 	mux := http.NewServeMux()
+	cmds := newTable()
 	mux.HandleFunc("GET /ping", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "version": version})
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "version": version, "boot": cmds.boot})
 	})
-	cmds := newTable()
 	mux.HandleFunc("POST /commands", cmds.start)
 	mux.HandleFunc("GET /commands", cmds.list)
 	mux.HandleFunc("GET /commands/{id}", cmds.read)
 	mux.HandleFunc("GET /commands/{id}/output", cmds.output)
 	mux.HandleFunc("POST /commands/{id}/stop", cmds.stop)
+	// Before serving: a command started and ended at once must not send its SIGCHLD before anyone catches it.
+	children := make(chan os.Signal, 1)
+	signal.Notify(children, syscall.SIGCHLD)
 	// If the socket ever fails, PID 1 still collects the processes: the sandbox keeps running.
 	go func() { fmt.Fprintln(os.Stderr, "parpaingd:", http.Serve(listener, mux)) }()
 
-	children := make(chan os.Signal, 1)
-	signal.Notify(children, syscall.SIGCHLD)
 	fmt.Println("parpaingd ready")
 	for range children {
 		cmds.reap()

@@ -109,7 +109,8 @@ const NOT_JSON = json(Problem, "The body is not labelled application/json");
 const STOPPED = json(Problem, "The sandbox is stopped");
 const STOPPED_OR_OLD = json(Problem, "The sandbox is stopped, or its daemon is too old for commands (recreate the sandbox)");
 const UNKNOWN_EITHER = json(Problem, "Unknown sandbox, or unknown command");
-const UNREACHABLE = json(Problem, "The sandbox daemon cannot be reached (a sandbox at its process limit for instance), or sent an answer too big, too slow or invalid");
+const LOST = json(Problem, "The command was lost in a sandbox restart");
+const UNREACHABLE = json(Problem, "The sandbox is starting or at its memory or process limit, or its daemon cannot be reached or sent an answer too big, too slow or invalid");
 const TAR = { "application/x-tar": { schema: z.string().openapi({ format: "binary" }) } };
 
 export const createSandbox = createRoute({
@@ -193,7 +194,7 @@ export const readCommand = createRoute({
   tags: ["Commands"],
   description: "Answers at once, while the command runs or after it ended: its state, its exit code once ended, and the size of its output.",
   request: { params: CommandParams },
-  responses: { 200: json(CommandState, "The command"), 404: UNKNOWN_EITHER, 409: STOPPED_OR_OLD, 503: UNREACHABLE },
+  responses: { 200: json(CommandState, "The command"), 404: UNKNOWN_EITHER, 409: STOPPED_OR_OLD, 410: LOST, 503: UNREACHABLE },
 });
 
 export const readOutput = createRoute({
@@ -209,6 +210,7 @@ export const readOutput = createRoute({
     400: json(Problem, "from or follow malformed"),
     404: UNKNOWN_EITHER,
     409: STOPPED_OR_OLD,
+    410: LOST,
     503: UNREACHABLE,
   },
 });
@@ -221,7 +223,7 @@ export const stopCommand = createRoute({
   description:
     "Answers at once, then sends SIGTERM to the command's process group and to every process carrying its PARPAING_EXEC, and SIGKILL 10 s later. Like every POST, it needs content-type: application/json; the body is ignored.",
   request: { params: CommandParams },
-  responses: { 202: json(z.object({}), "Stopping"), 404: UNKNOWN_EITHER, 409: STOPPED_OR_OLD, 415: NOT_JSON, 503: UNREACHABLE },
+  responses: { 202: json(z.object({}), "Stopping"), 404: UNKNOWN_EITHER, 409: STOPPED_OR_OLD, 410: LOST, 415: NOT_JSON, 503: UNREACHABLE },
 });
 
 export const readArchive = createRoute({

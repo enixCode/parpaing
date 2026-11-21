@@ -11,7 +11,7 @@ Website: <https://parpaing.dev>
 ## Features
 
 - **Any image**: a sandbox is a Docker container, even from an image without a shell.
-- **Commands**: start one, follow its output live, resume after a cut, stop it with everything it started.
+- **Commands**: start one, follow its output live, resume after a cut, stop it and the processes it started.
 - **Files**: a folder out as a tar archive, a tar back in.
 - **Isolation**: each sandbox alone in its network, internet only through an egress proxy; gVisor (runsc) for a stronger wall.
 - **Limits**: memory, CPU, processes and disk per sandbox.
@@ -41,7 +41,7 @@ Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. W
 | Sandboxes (CRUD) | `POST /sandboxes`<br>`GET /sandboxes`<br>`GET /sandboxes/:id`<br>`DELETE /sandboxes/:id` | Create, list, read, remove | 🟢 Done |
 | Commands | `POST /sandboxes/:id/commands`<br>`GET /sandboxes/:id/commands`<br>`GET /sandboxes/:id/commands/:cid` | Start a command (its id at once), list, read its state and exit code | 🟢 Done |
 | Command output | `GET /sandboxes/:id/commands/:cid/output?from=&follow=` | stdout and stderr live, resumable from any position | 🟢 Done |
-| Stop a command | `POST /sandboxes/:id/commands/:cid/stop` | The command and everything it started: SIGTERM, SIGKILL 10 s later | 🟢 Done |
+| Stop a command | `POST /sandboxes/:id/commands/:cid/stop` | The command and the processes it started (its group, and every process still carrying `PARPAING_EXEC`): SIGTERM, SIGKILL 10 s later | 🟢 Done |
 | Info | `GET /info` | Version, engines, capacity, sandbox count | 🟢 Done |
 | OpenAPI | `GET /openapi.json` | The API description, generated from the code | 🟢 Done |
 | Archives | `GET /sandboxes/:id/archive?path=`<br>`PUT /sandboxes/:id/archive?path=` | Download a folder as a tar, upload one back, streamed (tested with 3 GB). The image needs `tar` | 🟢 Done |
@@ -55,7 +55,7 @@ See the details in [ROADMAP.md](ROADMAP.md).
 ### Commands
 
 - **Started at once**: `POST` answers `201 {id}`; the command runs until it ends or is stopped.
-- **Survives the client**: it keeps running when the client leaves or parpaing restarts. A sandbox restart loses it (404).
+- **Survives the client**: it keeps running when the client leaves or parpaing restarts. A sandbox restart loses it (410).
 - **Last 50 finished kept**: past them, the next start removes the oldest finished command (404 after).
 - **Output**: one JSON line per piece, `{stream, data, next}`, then one closing line: `{exitCode, next}` once it ended, `{next}` when more may come, `{error, next}` when the link to the sandbox broke.
 - **Output kept**: per command, at least the last 50 MiB, at most about 100 MiB.
@@ -69,7 +69,8 @@ See the details in [ROADMAP.md](ROADMAP.md).
 | 400 | Empty command, or a program the sandbox cannot find |
 | 404 | Unknown sandbox or command |
 | 409 | Sandbox stopped, or its daemon too old for commands (recreate the sandbox) |
-| 503 | Daemon unreachable (a saturated sandbox) |
+| 410 | Command lost when its sandbox restarted (out of memory on gVisor, for instance) |
+| 503 | Sandbox at its memory or process limit, or starting; daemon unreachable |
 
 ## SDK
 
@@ -121,8 +122,8 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 - Any image works, even one without a shell or sleep.
 - Processes left behind are collected, so they never use up the process limit.
 - Signals from inside the sandbox do not end it.
-- It runs the commands: each one gets an id and can be stopped with everything it started.
-- It answers on a local socket, from inside the sandbox: `/.parpaing/parpaingd ping` gives `{"ok":true,"version":2}`.
+- It runs the commands: each one gets an id and can be stopped with the processes it started.
+- It answers on a local socket, from inside the sandbox: `/.parpaing/parpaingd ping` gives `{"ok":true,"version":2,"boot":"<4 hex>"}`.
 
 Next, on top of it:
 

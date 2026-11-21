@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { after, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import Docker from "dockerode";
 
 const BASE = process.env.PARPAING_URL ?? "http://127.0.0.1:8090";
 const KEY = process.env.PARPAING_API_KEY;
@@ -48,16 +49,28 @@ async function output(id: string, cid: string, from = 0, follow = true) {
   return { ...res, lines: res.status === 200 ? lines(res.text) : [] };
 }
 // Runs a command to its end and answers once, as one JSON with its exit code, stdout and stderr: start, then follow the
-// output, resuming from the last next after a pause or an error line (a relay killed from inside), 3 times in a row at most.
-// A refused start comes back as is.
-async function exec(id: string, cmd: unknown) {
+// output, resuming from the last next after a pause, an error line (a relay killed from inside) or a 503 (the daemon out of
+// reach for a moment, or the sandbox starting, 500 ms later), without progress at most 3 error lines or 20 answers 503 in a row.
+// Any other answer than 201 to the start or 200 to a read fails the test, unless its status is in allowed: then it comes back as is.
+async function exec(id: string, cmd: unknown, allowed: number[] = []) {
   const started = await start(id, cmd);
-  if (started.status !== 201) return started;
+  if (started.status !== 201) {
+    assert.ok(allowed.includes(started.status), `start answered ${started.status}: ${started.text}`);
+    return started;
+  }
   const data = { exitCode: -1, stdout: "", stderr: "" };
   let next = 0;
-  for (let failures = 0; failures < 3; ) {
+  for (let failures = 0, busy = 0; failures < 3 && busy < 20; ) {
     const res = await output(id, started.data.id, next);
-    assert.equal(res.status, 200, res.text);
+    if (res.status === 503) {
+      busy++;
+      await sleep(500);
+      continue;
+    }
+    if (res.status !== 200) {
+      assert.ok(allowed.includes(res.status), `output answered ${res.status}: ${res.text}`);
+      return res;
+    }
     const before = next;
     for (const line of res.lines) {
       next = line.next;
@@ -67,6 +80,7 @@ async function exec(id: string, cmd: unknown) {
         return { status: 200, data, text: JSON.stringify(data) };
       } else if (line.error) failures = next === before ? failures + 1 : 0;
     }
+    if (next !== before) failures = busy = 0;
   }
   throw new Error(`the output of ${JSON.stringify(cmd)} kept breaking`);
 }
@@ -142,8 +156,11 @@ describe("daemon", () => {
     // PID 1's start time changes if the sandbox restarts.
     const started = async () => (await exec(id, ["sh", "-c", "cut -d' ' -f22 /proc/1/stat"])).data.stdout;
     const before = await started();
-    for (const signal of ["TERM", "INT", "HUP", "QUIT", "USR1"]) await exec(id, ["kill", `-${signal}`, "1"]);
-    await exec(id, ["sh", "-c", "kill -9 -1"]);
+    // Through sh: kill is a shell builtin, the image has no kill program. ABRT and SEGV: Go handles them itself, so without a
+    // catch-all they would reach PID 1 and end it.
+    for (const signal of ["TERM", "INT", "HUP", "QUIT", "USR1", "ABRT", "SEGV"]) await exec(id, ["sh", "-c", `kill -${signal} 1`]);
+    // kill -9 -1 also kills the relay that carries this very call: its 503 is expected.
+    await exec(id, ["sh", "-c", "kill -9 -1"], [503]);
     await sleep(1500);
     assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
     assert.equal(await started(), before);
@@ -157,7 +174,9 @@ describe("daemon", () => {
       // On runsc, /tmp is a mount point: rm empties it and fails on the folder itself.
       const ping = await exec(id, ["sh", "-c", "rm -rf /tmp; /.parpaing/parpaingd ping"]);
       assert.equal(ping.data.exitCode, 0, ping.data.stderr);
-      assert.deepEqual(JSON.parse(ping.data.stdout), { ok: true, version: 2 });
+      const { boot, ...rest } = JSON.parse(ping.data.stdout);
+      assert.deepEqual(rest, { ok: true, version: 2 });
+      assert.match(boot, /^[0-9a-f]{4}$/);
     }
   });
 
@@ -203,16 +222,19 @@ describe("limits", () => {
 
   test("past its memory, the command is killed", async () => {
     const res = await api("POST", "/sandboxes", { memory: 64 });
+    assert.equal(res.status, 201, res.text);
     const { id } = res.data;
     created.push(id);
+    // runc kills one process and the sandbox lives on; gVisor stops the whole sandbox, which Docker then starts again: the
+    // command is then lost in the restart (410), or the sandbox is still starting (409).
     // tail keeps the last lines of an endless input without newlines: its memory grows until the kernel stops it.
-    const run = await exec(id, ["sh", "-c", "tail /dev/zero"]);
-    assert.notEqual(run.data.exitCode, 0);
-    // runc kills one process and the sandbox lives on; gVisor stops the whole sandbox, which Docker then starts again.
+    const run = await exec(id, ["sh", "-c", "tail /dev/zero"], GVISOR ? [409, 410] : []);
     if (!GVISOR) {
       assert.equal(run.data.exitCode, 137);
       assert.equal((await api("GET", `/sandboxes/${id}`)).data.state, "running");
-    }
+    } else if (run.status === 200) assert.ok(run.data.exitCode > 0, run.text);
+    else if (run.status === 410) assert.match(run.data.error, /restarted at/, run.text);
+    else assert.equal(run.status, 409, run.text);
   });
 
   test("the disk limit holds on runsc", { skip: GVISOR ? false : "runc cannot enforce it without host setup" }, async () => {
@@ -428,15 +450,36 @@ describe("commands", () => {
     assert.equal((await output(id, data.id, 6, false)).lines[0].data, "late\n");
   });
 
-  test("stop ends the process group with SIGTERM, or SIGKILL 10 s later", { timeout: 40_000 }, async () => {
+  test("stop ends the process group with SIGTERM, or SIGKILL 10 s later", { timeout: 60_000 }, async () => {
     const id = await newSandbox();
-    const term = await start(id, ["sh", "-c", "sleep 300 & sleep 300"]);
+    // The command lines of the processes left in the sandbox, read a few times while the signalled ones end.
+    const list = ["sh", "-c", 'for p in /proc/[0-9]*; do tr "\\0" " " < $p/cmdline; echo; done'];
+    async function sleepsLeft() {
+      let left = "";
+      for (let tries = 0; tries < 10; tries++) {
+        left = (await exec(id, list)).data.stdout;
+        if (!left.includes("sleep 300")) break;
+        await sleep(300);
+      }
+      return left;
+    }
+    const term = await start(id, ["sh", "-c", "sleep 300 & sleep 300 & wait"]);
     let since = performance.now();
     const stopped = await stop(id, term.data.id);
     assert.equal(stopped.status, 202);
     assert.deepEqual(stopped.data, {});
     assert.equal((await ended(id, term.data.id)).exitCode, 143);
     assert.ok(performance.now() - since < 3000, `exited after ${Math.round(performance.now() - since)} ms`);
+    let left = await sleepsLeft();
+    assert.ok(!left.includes("sleep 300"), left);
+
+    // setsid takes the child out of the group; it keeps PARPAING_EXEC, which stop also signals.
+    const away = await start(id, ["sh", "-c", "setsid sleep 300 & sleep 300 & wait"]);
+    await sleep(300);
+    assert.equal((await stop(id, away.data.id)).status, 202);
+    assert.equal((await ended(id, away.data.id)).exitCode, 143);
+    left = await sleepsLeft();
+    assert.ok(!left.includes("sleep 300"), left);
 
     const deaf = await start(id, ["sh", "-c", 'trap "" TERM; sleep 300']);
     await sleep(300);
@@ -466,6 +509,29 @@ describe("commands", () => {
     assert.deepEqual((await output(id, data.id, 0, false)).lines, [{ next: 0 }]);
   });
 
+  test("a command lost in a sandbox restart answers 410", { timeout: 120_000 }, async () => {
+    const since = performance.now();
+    const id = await newSandbox();
+    const started = await start(id, ["sleep", "300"]);
+    assert.equal(started.status, 201, started.text);
+    // docker restart does not raise RestartCount: only a start more than 30 s after the creation counts as a restart.
+    await sleep(31_000 - (performance.now() - since));
+    // The sandbox id is the start of its container's id.
+    await new Docker().getContainer(id).restart({ t: 1 });
+    for (let tries = 0; (await api("GET", `/sandboxes/${id}`)).data.state !== "running"; tries++) {
+      assert.ok(tries < 300, "the sandbox is not running again after 30 s");
+      await sleep(100);
+    }
+    // The daemon needs a moment to listen: 503 until then.
+    let lost = await read(id, started.data.id);
+    for (let tries = 0; lost.status === 503 && tries < 150; tries++) {
+      await sleep(200);
+      lost = await read(id, started.data.id);
+    }
+    assert.equal(lost.status, 410, lost.text);
+    assert.match(lost.data.error, /restarted at/);
+  });
+
   test("refuses an unknown command, a bad position, a missing program and an unknown sandbox", { timeout: 30_000 }, async () => {
     const id = await newSandbox();
     for (const cid of ["000000000000", "nothex"]) {
@@ -490,8 +556,9 @@ describe("commands", () => {
   });
 
   test("the daemon's file descriptors stay out of reach", { timeout: 30_000 }, async () => {
+    // exec fails the test if the API does: 1 is readlink's own refusal.
     const res = await exec(await newSandbox(), ["readlink", "/proc/1/fd/0"]);
-    assert.notEqual(res.data.exitCode, 0);
+    assert.equal(res.data.exitCode, 1, res.text);
   });
 
   test("refuses a missing or malformed command with an example", async () => {
@@ -530,7 +597,8 @@ describe("network", () => {
   test("has no direct way out", async () => {
     const id = await newSandbox();
     const run = await exec(id, ["bash", "-c", "timeout 5 bash -c '</dev/tcp/1.1.1.1/443'"]);
-    assert.notEqual(run.data.exitCode, 0);
+    // 1: the connection failed, 124: it hung until the timeout; anything else is not a network answer.
+    assert.ok([1, 124].includes(run.data.exitCode), run.text);
   });
 
   test("the proxy refuses the host, the local network, metadata and other sandboxes", async () => {
@@ -539,7 +607,10 @@ describe("network", () => {
     const address = stdout((await exec(other, ["sh", "-c", "grep \"$(cat /etc/hostname)\" /etc/hosts | cut -f1"])).text).trim();
     assert.match(address, /^10\.89\./);
     for (const target of ["169.254.169.254:80", "172.17.0.1:2375", "192.168.1.1:80", "10.0.0.1.nip.io:80", `${address}:22`]) {
-      assert.ok(!agreed((await tunnel(id, target)).text), target);
+      // Exit code 0: the proxy was reached and answered or closed in time, so the refusal is the proxy's own.
+      const run = await tunnel(id, target);
+      assert.equal(run.data.exitCode, 0, `${target}: ${run.text}`);
+      assert.ok(!agreed(run.text), target);
     }
   });
 
