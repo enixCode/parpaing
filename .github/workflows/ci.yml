@@ -1,4 +1,4 @@
-# CI: type check, build both images with compose, then run the API tests (tests/) without an API key, with one, and on a full machine;
+# CI: type check, check the daemon (gofmt, vet, Go tests), build both images with compose, then run the API tests (tests/) without an API key, with one, and on a full machine;
 # then the same tests with gVisor (runsc) as the engine.
 name: ci
 
@@ -27,6 +27,11 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm run typecheck
+
+      - name: Daemon check
+        run: |
+          docker run --rm -v "$PWD/daemon:/src" -w /src golang:1.27-trixie \
+            sh -c 'test -z "$(gofmt -l .)" && go vet ./... && go test ./...'
 
       - name: Build and start
         run: docker compose up -d --build

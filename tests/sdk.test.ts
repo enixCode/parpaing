@@ -31,16 +31,32 @@ describe("sdk", () => {
     await assert.rejects(parpaing.get(box.id), new ParpaingError(404, "unknown sandbox"));
   });
 
-  test("runs a command, in one answer or live", async () => {
+  test("runs a command, in one answer or live", { timeout: 30_000 }, async () => {
     const id = await newSandbox();
     const once = await parpaing.exec(id, ["sh", "-c", "echo out; echo oops >&2; exit 3"]);
-    assert.deepEqual(once, { exitCode: 3, stdout: "out\n", stderr: "oops\n", truncated: false });
+    assert.deepEqual(once, { exitCode: 3, stdout: "out\n", stderr: "oops\n" });
     const chunks: string[] = [];
     const live = await parpaing.exec(id, ["sh", "-c", "echo first; sleep 1; echo second >&2"], {
       onOutput: (data, stream) => chunks.push(`${stream}: ${data}`),
     });
     assert.deepEqual(live, { exitCode: 0 });
     assert.deepEqual(chunks, ["stdout: first\n", "stderr: second\n"]);
+  });
+
+  test("starts a command, reads it, its output, and stops it", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const { id: cid } = await parpaing.start(id, ["sh", "-c", "echo a; sleep 300"]);
+    assert.match(cid, /^[0-9a-f]{12}$/);
+    const pieces: string[] = [];
+    let read = await parpaing.output(id, cid, { onOutput: (data) => pieces.push(data) });
+    for (let tries = 0; !pieces.length && tries < 20; tries++) read = await parpaing.output(id, cid, { onOutput: (data) => pieces.push(data) });
+    assert.deepEqual(pieces, ["a\n"]);
+    assert.deepEqual(read, { next: 2 });
+    assert.deepEqual(await parpaing.commands(id), [{ id: cid, cmd: ["sh", "-c", "echo a; sleep 300"], state: "running", exitCode: null }]);
+    await parpaing.stop(id, cid);
+    assert.deepEqual(await parpaing.output(id, cid, { from: read.next, follow: true }), { exitCode: 143, next: 2 });
+    assert.deepEqual(await parpaing.command(id, cid), { id: cid, cmd: ["sh", "-c", "echo a; sleep 300"], state: "exited", exitCode: 143, outputSize: 2 });
+    await assert.rejects(parpaing.command(id, "000000000000"), new ParpaingError(404, "unknown command"));
   });
 
   test("streams a folder out and straight back in", async () => {

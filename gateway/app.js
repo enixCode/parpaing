@@ -79,8 +79,9 @@ async function call(method, path, body) {
 
 let calls = 0;
 function log(method, path, body, status, data, ms) {
-  // -N: curl prints each line as soon as it arrives, without waiting for the end.
-  const curl = `curl ${path.endsWith("/exec") ? "-N " : ""}-X ${method} ${BASE}${path}` + (keyField.value.trim() ? ' -H "authorization: Bearer $PARPAING_API_KEY"' : "") + (body ? ` -H 'content-type: application/json' -d '${JSON.stringify(body).replaceAll("'", "'\\''")}'` : "");
+  // -N: curl prints each line as soon as it arrives, without waiting for the end. A URL with a query is quoted: the shell
+  // would take its & for the end of the command.
+  const curl = `curl ${path.includes("/output?") ? "-N " : ""}-X ${method} ${path.includes("?") ? `'${BASE}${path}'` : BASE + path}` + (keyField.value.trim() ? ' -H "authorization: Bearer $PARPAING_API_KEY"' : "") + (body ? ` -H 'content-type: application/json' -d '${JSON.stringify(body).replaceAll("'", "'\\''")}'` : "");
   const shown = data === undefined ? "(no body)" : typeof data === "string" ? data : JSON.stringify(data, null, 2);
   const entry = document.createElement("li");
   entry.className = "call";
@@ -222,53 +223,61 @@ function print(text, className) {
   $("term").scrollTop = $("term").scrollHeight;
 }
 
-// The typed line goes to sh -c as is, with stream: true. The output shows up as the JSON lines arrive;
-// the drawer keeps those raw lines.
+// The typed line goes to sh -c as is: POST .../commands starts it, then GET .../output?follow=true shows its output as the
+// JSON lines arrive, asked again from next when the daemon pauses a long silence. The drawer keeps those raw lines.
 $("exec").onsubmit = async (event) => {
   event.preventDefault();
   const typed = $("cmd").value.trim();
   if (!typed || !chosen) return;
-  const path = `/sandboxes/${chosen}/exec`;
-  const body = { cmd: ["sh", "-c", typed], stream: true };
+  const sandbox = chosen;
   const btn = $("exec-btn");
   running = true;
   ready();
   btn.textContent = "Running…";
   aglo($("term-aglo"), "working");
-  $("status-last").replaceChildren(...summary("POST", path));
   $("term").replaceChildren();
   print("$ ", "dollar");
   print(`${typed}\n`);
-  const started = performance.now();
-  let status = 0, raw = "", failed = false;
-  try {
-    const res = await fetch(path, { method: "POST", headers: authorize({ "content-type": "application/json" }), body: JSON.stringify(body) });
-    status = res.status;
-    askKey(status);
-    if (!res.ok) {
-      raw = await res.text();
-      print(raw, "stderr");
-      failed = true;
-    } else {
-      let rest = "";
-      for await (const chunk of res.body.pipeThrough(new TextDecoderStream())) {
-        raw += chunk;
-        const lines = (rest + chunk).split("\n");
-        rest = lines.pop();
-        for (const text of lines.filter(Boolean)) {
-          const msg = JSON.parse(text);
-          if (msg.stream) print(msg.data, msg.stream === "stderr" ? "stderr" : "");
-          else if ("exitCode" in msg) print(`\n[exit code ${msg.exitCode}]`, msg.exitCode === 0 ? "end" : "bad");
-          else if (msg.error) { print(`\n[error: ${msg.error}]`, "stderr"); failed = true; }
+  const started = await call("POST", `/sandboxes/${sandbox}/commands`, { cmd: ["sh", "-c", typed] });
+  let failed = started.status !== 201, ended = false, next = 0;
+  if (failed) print(`${why(started.data)}`, "stderr");
+  while (!failed && !ended) {
+    const path = `/sandboxes/${sandbox}/commands/${started.data.id}/output?from=${next}&follow=true`;
+    $("status-last").replaceChildren(...summary("GET", path));
+    const begun = performance.now();
+    let status = 0, raw = "";
+    try {
+      const res = await fetch(path, { headers: authorize({}) });
+      status = res.status;
+      askKey(status);
+      if (!res.ok) {
+        raw = await res.text();
+        print(raw, "stderr");
+        failed = true;
+      } else {
+        let rest = "";
+        for await (const chunk of res.body.pipeThrough(new TextDecoderStream())) {
+          raw += chunk;
+          const lines = (rest + chunk).split("\n");
+          rest = lines.pop();
+          for (const text of lines.filter(Boolean)) {
+            const msg = JSON.parse(text);
+            if ("next" in msg) next = msg.next;
+            if (msg.stream) print(msg.data, msg.stream === "stderr" ? "stderr" : "");
+            // The start of a long output is no longer kept: the reading goes on from what is.
+            else if ("skipped" in msg) print(`[${msg.skipped} bytes skipped]\n`, "info");
+            else if ("exitCode" in msg) { print(`\n[exit code ${msg.exitCode}]`, msg.exitCode === 0 ? "end" : "bad"); ended = true; }
+            else if (msg.error) { print(`\n[error: ${msg.error}]`, "stderr"); failed = true; }
+          }
         }
       }
+    } catch (error) {
+      raw = `parpaing is not responding (${error.message})`;
+      print(raw, "stderr");
+      failed = true;
     }
-  } catch (error) {
-    raw = `parpaing is not responding (${error.message})`;
-    print(raw, "stderr");
-    failed = true;
+    log("GET", path, undefined, status, raw.trimEnd(), Math.round(performance.now() - begun));
   }
-  log("POST", path, body, status, raw.trimEnd(), Math.round(performance.now() - started));
   running = false;
   ready();
   btn.textContent = "Run command";

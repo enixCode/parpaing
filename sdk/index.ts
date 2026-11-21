@@ -38,8 +38,31 @@ export interface CommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
-  /** stdout or stderr went past 10 MB and was cut. */
-  truncated: boolean;
+  /** Bytes of output no longer kept, only when some were: a command keeps at least its last 50 MiB, at most about 100 MiB. */
+  skipped?: number;
+}
+
+export interface CommandItem {
+  id: string;
+  cmd: string[];
+  /** exited once the main process has ended; processes it left behind may still add output. */
+  state: "running" | "exited";
+  /** null while the command runs; 128 + the signal number when a signal killed it. */
+  exitCode: number | null;
+}
+
+export interface Command extends CommandItem {
+  /** Bytes of output so far, stdout and stderr together. */
+  outputSize: number;
+}
+
+export interface OutputOptions {
+  /** The byte position to read from, 0 by default: the `next` of an earlier read resumes it. */
+  from?: number;
+  /** false by default: stop once caught up. true: wait for more output, until the end or about 50 s of silence. */
+  follow?: boolean;
+  onOutput?: OnOutput;
+  signal?: AbortSignal;
 }
 
 export interface Info {
@@ -122,24 +145,76 @@ export class Parpaing {
   }
 
   /**
-   * Runs a command to its end and answers once. With `onOutput`, the output comes live instead, chunk by chunk, and only
-   * the exit code is returned. Aborting `signal` stops waiting, not the command.
+   * Runs a command to its end and answers once. With `onOutput`, the output comes live instead, piece by piece, and only
+   * the exit code is returned. `skipped` counts the bytes no longer kept, when some were. A broken connection resumes where
+   * it stopped. Aborting `signal` stops reading, not the command.
    */
   exec(id: string, cmd: string[], options?: { signal?: AbortSignal }): Promise<CommandResult>;
-  exec(id: string, cmd: string[], options: { onOutput: OnOutput; signal?: AbortSignal }): Promise<{ exitCode: number }>;
+  exec(id: string, cmd: string[], options: { onOutput: OnOutput; signal?: AbortSignal }): Promise<{ exitCode: number; skipped?: number }>;
   async exec(id: string, cmd: string[], { onOutput, signal }: { onOutput?: OnOutput; signal?: AbortSignal } = {}) {
-    const json = { cmd, stream: onOutput !== undefined };
-    const res = await this.#call("POST", `/sandboxes/${encodeURIComponent(id)}/exec`, { json, signal });
-    if (!onOutput) return res.json();
-    let exitCode: number | undefined;
+    const output = { stdout: "", stderr: "" };
+    const show: OnOutput = onOutput ?? ((data, stream) => (output[stream] += data));
+    const { id: cid } = await this.start(id, cmd, signal);
+    const at = { next: 0, skipped: 0 };
+    for (let failures = 0; ; ) {
+      const before = at.next;
+      try {
+        const { exitCode } = await this.#read(id, cid, at, true, show, signal);
+        const skipped = at.skipped ? { skipped: at.skipped } : {};
+        if (exitCode !== undefined) return onOutput ? { exitCode, ...skipped } : { exitCode, ...output, ...skipped };
+        failures = 0;
+      } catch (error) {
+        // A refusal or an abort ends here; a broken connection or relay is tried again, 3 times in a row without progress at most.
+        if (signal?.aborted || (error instanceof ParpaingError && error.status < 500)) throw error;
+        failures = at.next === before ? failures + 1 : 0;
+        if (failures >= 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  }
+
+  /** Starts a command and answers its id at once. It runs until it ends or is stopped, whoever reads it. */
+  async start(id: string, cmd: string[], signal?: AbortSignal): Promise<{ id: string }> {
+    return (await this.#call("POST", commands(id), { json: { cmd }, signal })).json();
+  }
+
+  /** The running commands and the last 50 finished ones, in start order. */
+  async commands(id: string): Promise<CommandItem[]> {
+    return (await this.#call("GET", commands(id))).json();
+  }
+
+  async command(id: string, cid: string): Promise<Command> {
+    return (await this.#call("GET", commands(id, cid))).json();
+  }
+
+  /**
+   * Reads a command's output once, from `from`: each piece goes to `onOutput`. Answers `next`, where to resume, the exit
+   * code once the output is finished, and `skipped`, the bytes no longer kept, when the read started before what is kept.
+   */
+  async output(id: string, cid: string, { from = 0, follow = false, onOutput, signal }: OutputOptions = {}): Promise<{ exitCode?: number; next: number; skipped?: number }> {
+    const at = { next: from, skipped: 0 };
+    const { exitCode } = await this.#read(id, cid, at, follow, onOutput, signal);
+    return { ...(exitCode === undefined ? {} : { exitCode }), next: at.next, ...(at.skipped ? { skipped: at.skipped } : {}) };
+  }
+
+  /** SIGTERM to the command, SIGKILL 10 s later. Answers at once. */
+  async stop(id: string, cid: string): Promise<void> {
+    await this.#call("POST", `${commands(id, cid)}/stop`, { json: {} });
+  }
+
+  // One read of the output from at.next; at.next follows each line, so a read that breaks still says how far it got. A
+  // skipped line adds to at.skipped and the read goes on.
+  async #read(id: string, cid: string, at: { next: number; skipped: number }, follow: boolean, onOutput?: OnOutput, signal?: AbortSignal) {
+    const res = await this.#call("GET", `${commands(id, cid)}/output?from=${at.next}&follow=${follow}`, { signal });
     for await (const line of lines(res.body!)) {
       const item = JSON.parse(line);
-      if (item.data !== undefined) onOutput(item.data, item.stream);
-      else if (item.exitCode !== undefined) exitCode = item.exitCode;
-      else if (item.error !== undefined) throw new ParpaingError(500, item.error);
+      if (item.error !== undefined) throw new ParpaingError(502, item.error);
+      at.next = item.next;
+      if (item.stream !== undefined) onOutput?.(item.data, item.stream);
+      else if (item.skipped !== undefined) at.skipped += item.skipped;
+      else return { exitCode: item.exitCode as number | undefined };
     }
-    if (exitCode === undefined) throw new ParpaingError(502, "the output ended without an exit code");
-    return { exitCode };
+    throw new ParpaingError(502, "the output ended without a closing line");
   }
 
   /** A folder of the sandbox as a tar archive, streamed. The image needs tar. */
@@ -153,6 +228,7 @@ export class Parpaing {
   }
 }
 
+const commands = (id: string, cid?: string) => `/sandboxes/${encodeURIComponent(id)}/commands` + (cid === undefined ? "" : `/${encodeURIComponent(cid)}`);
 const archive = (id: string, path: string) => `/sandboxes/${encodeURIComponent(id)}/archive?path=${encodeURIComponent(path)}`;
 
 // The lines of an NDJSON body, whole even when a chunk cuts one in two.

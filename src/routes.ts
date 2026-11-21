@@ -3,6 +3,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 
 export const UNKNOWN = { error: "unknown sandbox" };
+export const UNKNOWN_COMMAND = { error: "unknown command" };
 const IMAGE_HELP = "image: an image name, for example debian:trixie-slim";
 const CMD_HELP = 'cmd: a command as an array, for example ["ls", "-la"]';
 const MEMORY_HELP = "memory: megabytes, a whole number from 16, for example 2048";
@@ -51,22 +52,43 @@ const NewSandbox = z.object({
   wait: whole(WAIT_HELP, 0).max(300, { error: WAIT_HELP }).optional().openapi({ description: "Seconds to wait if the machine lacks free memory, 0 by default", example: 30 }),
 });
 const Folder = z.object({ path: z.string({ error: PATH_HELP }).startsWith("/", { error: PATH_HELP }).openapi({ example: "/root/project" }) });
-const STREAM_HELP = "stream: true for live output, false (the default) for one answer when the command ends";
+const FROM_HELP = "from: a byte position in the output, 0 or more, for example 0";
+const FOLLOW_HELP = "follow: true or false";
 const Command = z.object({
   cmd: z.array(z.string({ error: CMD_HELP }), { error: CMD_HELP }).min(1, { error: CMD_HELP }).openapi({ example: ["ls", "-la"] }),
-  stream: z
-    .boolean({ error: STREAM_HELP })
-    .optional()
-    .openapi({ description: "false by default: one JSON answer when the command ends. true: one JSON line per output chunk as it comes, then the exit code" }),
 });
-const CommandResult = z
-  .object({
-    exitCode: z.number().int(),
-    stdout: z.string(),
-    stderr: z.string(),
-    truncated: z.boolean().openapi({ description: "stdout or stderr went past 10 MB and was cut" }),
-  })
-  .openapi("CommandResult");
+export const CommandStarted = z.object({ id: Id }).openapi("CommandStarted");
+const commandFields = {
+  id: Id,
+  cmd: z.array(z.string()).openapi({ example: ["ls", "-la"] }),
+  state: z.enum(["running", "exited"]).openapi({ description: "exited once the main process has ended; processes it left behind may still add output" }),
+  exitCode: z.number().int().nullable().openapi({ description: "null while the command runs; 128 + the signal number when a signal killed it" }),
+};
+export const CommandItem = z.object(commandFields).openapi("CommandItem");
+export const CommandState = z
+  .object({ ...commandFields, outputSize: z.number().int().openapi({ description: "Bytes of output so far, stdout and stderr together" }) })
+  .openapi("CommandState");
+const Next = z.number().int().min(0).openapi({ description: "The byte position to resume from: from=next" });
+const OutputChunk = z.object({ stream: z.enum(["stdout", "stderr"]), data: z.string().openapi({ description: "At most 64 KiB of UTF-8" }), next: Next });
+const OutputSkipped = z.object({
+  skipped: z.number().int().min(0).openapi({ description: "Bytes of output no longer kept: the reading goes on at next, where the kept output starts" }),
+  next: Next,
+});
+const OutputEnd = z.object({ exitCode: z.number().int(), next: Next });
+const OutputPause = z.object({ next: Next });
+// The lines a daemon may send, in this order: a skipped line or a closing line with an exit code must not pass for a pause.
+export const DaemonLine = z.union([OutputChunk, OutputSkipped, OutputEnd, OutputPause]);
+const OutputLine = z
+  .union([OutputChunk, OutputSkipped, OutputEnd, OutputPause, z.object({ error: z.string(), next: Next })])
+  .openapi("OutputLine", {
+    description:
+      "An output piece; skipped, the bytes no longer kept before next; or the closing line: exitCode once the output is finished, next alone when there is more to read later, error when the relay to the sandbox broke",
+  });
+const CommandParams = z.object({ id: Id, cid: Id });
+const Output = z.object({
+  from: z.coerce.number({ error: FROM_HELP }).int({ error: FROM_HELP }).min(0, { error: FROM_HELP }).optional().openapi({ description: "0 by default", example: 0 }),
+  follow: z.enum(["true", "false"], { error: FOLLOW_HELP }).optional().openapi({ description: "false by default: stop once caught up. true: wait for more output" }),
+});
 const Info = z
   .object({
     name: z.string(),
@@ -79,19 +101,15 @@ const Info = z
     sandboxes: z.object({ total: z.number().int(), running: z.number().int() }),
   })
   .openapi("Info");
-const ExecLine = z
-  .union([
-    z.object({ stream: z.enum(["stdout", "stderr"]), data: z.string() }),
-    z.object({ exitCode: z.number().int() }),
-    z.object({ error: z.string() }),
-  ])
-  .openapi("ExecLine");
 
 const json = <T extends z.ZodType>(schema: T, description: string) => ({ description, content: { "application/json": { schema } } });
 const body = <T extends z.ZodType>(schema: T) => ({ body: { required: true, content: { "application/json": { schema } } } });
 const NOT_FOUND = json(Problem, "Unknown sandbox");
 const NOT_JSON = json(Problem, "The body is not labelled application/json");
 const STOPPED = json(Problem, "The sandbox is stopped");
+const STOPPED_OR_OLD = json(Problem, "The sandbox is stopped, or its daemon is too old for commands (recreate the sandbox)");
+const UNKNOWN_EITHER = json(Problem, "Unknown sandbox, or unknown command");
+const UNREACHABLE = json(Problem, "The sandbox daemon cannot be reached (a sandbox at its process limit for instance), or sent an answer too big, too slow or invalid");
 const TAR = { "application/x-tar": { schema: z.string().openapi({ format: "binary" }) } };
 
 export const createSandbox = createRoute({
@@ -137,24 +155,73 @@ export const deleteSandbox = createRoute({
   responses: { 204: { description: "Deleted" }, 404: NOT_FOUND },
 });
 
-export const runCommand = createRoute({
+export const startCommand = createRoute({
   method: "post",
-  path: "/sandboxes/{id}/exec",
-  summary: "Run a command",
+  path: "/sandboxes/{id}/commands",
+  summary: "Start a command",
   tags: ["Commands"],
   description:
-    "Runs the command to its end and answers once: exit code, stdout and stderr (each cut past 10 MB). With stream: true, the output comes live instead, one JSON object per line: stdout and stderr chunks as they come, then the exit code; a failure after the start ends that stream with an error line. A client that leaves does not stop the command.",
+    "The sandbox daemon starts the command and parpaing answers at once with its id. The command runs in its own process group, with its id in PARPAING_EXEC, until it ends or is stopped: a client that leaves does not stop it. GET .../output reads what it prints.",
   request: { params: Params, ...body(Command) },
   responses: {
-    200: {
-      description: "The result in one JSON answer, or with stream: true one ExecLine per line, the last one holding the exit code",
-      content: { "application/json": { schema: CommandResult }, "application/x-ndjson": { schema: ExecLine } },
+    201: {
+      ...json(CommandStarted, "The command started"),
+      headers: { Location: { description: "The command: /sandboxes/{id}/commands/{cid}", schema: { type: "string" } } },
     },
-    400: json(Problem, "No command, or stream not a boolean"),
+    400: json(Problem, "No command, or a program the sandbox cannot start"),
     404: NOT_FOUND,
-    409: STOPPED,
+    409: STOPPED_OR_OLD,
     415: NOT_JSON,
+    503: UNREACHABLE,
   },
+});
+
+export const listCommands = createRoute({
+  method: "get",
+  path: "/sandboxes/{id}/commands",
+  summary: "List the commands",
+  tags: ["Commands"],
+  description: "The running commands and the last 50 finished ones, in start order: past 50, starting a command removes the oldest finished one.",
+  request: { params: Params },
+  responses: { 200: json(z.array(CommandItem), "The commands, oldest first"), 404: NOT_FOUND, 409: STOPPED_OR_OLD, 503: UNREACHABLE },
+});
+
+export const readCommand = createRoute({
+  method: "get",
+  path: "/sandboxes/{id}/commands/{cid}",
+  summary: "Get a command",
+  tags: ["Commands"],
+  description: "Answers at once, while the command runs or after it ended: its state, its exit code once ended, and the size of its output.",
+  request: { params: CommandParams },
+  responses: { 200: json(CommandState, "The command"), 404: UNKNOWN_EITHER, 409: STOPPED_OR_OLD, 503: UNREACHABLE },
+});
+
+export const readOutput = createRoute({
+  method: "get",
+  path: "/sandboxes/{id}/commands/{cid}/output",
+  summary: "Read a command's output",
+  tags: ["Commands"],
+  description:
+    "stdout and stderr in the order they came, from byte `from`, one JSON object per line as it comes. Each piece carries `next`, and the last line says why the answer ends: the exit code once the output is finished, `next` alone when there is more to read later (follow=false once caught up, or follow=true after 50 s with nothing to send), or an error when the relay to the sandbox broke. To resume, ask again with from=next. A command keeps at least the last 50 MiB of its output, at most about 100 MiB: reading from before it first gives `{skipped, next}`, the bytes lost, then goes on from next. Inside the sandbox, the kept output is in /tmp/parpaing/{cid}/stdout and stderr, the previous part in stdout.1 and stderr.1, until the command leaves the list or the sandbox restarts.",
+  request: { params: CommandParams, query: Output },
+  responses: {
+    200: { description: "One OutputLine per line, the last one closing", content: { "application/x-ndjson": { schema: OutputLine } } },
+    400: json(Problem, "from or follow malformed"),
+    404: UNKNOWN_EITHER,
+    409: STOPPED_OR_OLD,
+    503: UNREACHABLE,
+  },
+});
+
+export const stopCommand = createRoute({
+  method: "post",
+  path: "/sandboxes/{id}/commands/{cid}/stop",
+  summary: "Stop a command",
+  tags: ["Commands"],
+  description:
+    "Answers at once, then sends SIGTERM to the command's process group and to every process carrying its PARPAING_EXEC, and SIGKILL 10 s later. Like every POST, it needs content-type: application/json; the body is ignored.",
+  request: { params: CommandParams },
+  responses: { 202: json(z.object({}), "Stopping"), 404: UNKNOWN_EITHER, 409: STOPPED_OR_OLD, 415: NOT_JSON, 503: UNREACHABLE },
 });
 
 export const readArchive = createRoute({
@@ -207,7 +274,7 @@ export const document = (version: string) => ({
   security: [{ apiKey: [] }, {}] as Record<string, string[]>[],
   tags: [
     { name: "Sandboxes", description: "Create, list, read and delete sandboxes" },
-    { name: "Commands", description: "Run commands in a sandbox" },
+    { name: "Commands", description: "Start commands in a sandbox, read their output live, stop them" },
     { name: "Files", description: "Copy folders out of and into a sandbox" },
     { name: "Machine", description: "What this machine offers" },
   ],

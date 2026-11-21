@@ -41,9 +41,35 @@ async function newSandbox() {
 const lines = (text: string) => text.trim().split("\n").map((line) => JSON.parse(line));
 // The whole stdout of a command, whatever chunks it came in.
 const stdout = (text: string) => JSON.parse(text).stdout as string;
-// One answer when the command ends (the default), or the live stream.
-const exec = (id: string, cmd: unknown) => api("POST", `/sandboxes/${id}/exec`, { cmd });
-const execStream = (id: string, cmd: unknown) => api("POST", `/sandboxes/${id}/exec`, { cmd, stream: true });
+const start = (id: string, cmd: unknown) => api("POST", `/sandboxes/${id}/commands`, { cmd });
+// One read of a command's output: the answer, and its lines when it has some.
+async function output(id: string, cid: string, from = 0, follow = true) {
+  const res = await api("GET", `/sandboxes/${id}/commands/${cid}/output?from=${from}&follow=${follow}`);
+  return { ...res, lines: res.status === 200 ? lines(res.text) : [] };
+}
+// Runs a command to its end and answers once, as one JSON with its exit code, stdout and stderr: start, then follow the
+// output, resuming from the last next after a pause or an error line (a relay killed from inside), 3 times in a row at most.
+// A refused start comes back as is.
+async function exec(id: string, cmd: unknown) {
+  const started = await start(id, cmd);
+  if (started.status !== 201) return started;
+  const data = { exitCode: -1, stdout: "", stderr: "" };
+  let next = 0;
+  for (let failures = 0; failures < 3; ) {
+    const res = await output(id, started.data.id, next);
+    assert.equal(res.status, 200, res.text);
+    const before = next;
+    for (const line of res.lines) {
+      next = line.next;
+      if (line.stream) data[line.stream as "stdout" | "stderr"] += line.data;
+      else if (line.exitCode !== undefined) {
+        data.exitCode = line.exitCode;
+        return { status: 200, data, text: JSON.stringify(data) };
+      } else if (line.error) failures = next === before ? failures + 1 : 0;
+    }
+  }
+  throw new Error(`the output of ${JSON.stringify(cmd)} kept breaking`);
+}
 
 after(async () => {
   for (const id of created) await api("DELETE", `/sandboxes/${id}`);
@@ -131,7 +157,7 @@ describe("daemon", () => {
       // On runsc, /tmp is a mount point: rm empties it and fails on the folder itself.
       const ping = await exec(id, ["sh", "-c", "rm -rf /tmp; /.parpaing/parpaingd ping"]);
       assert.equal(ping.data.exitCode, 0, ping.data.stderr);
-      assert.deepEqual(JSON.parse(ping.data.stdout), { ok: true, version: 1 });
+      assert.deepEqual(JSON.parse(ping.data.stdout), { ok: true, version: 2 });
     }
   });
 
@@ -232,58 +258,249 @@ describe("limits", () => {
 });
 
 describe("commands", () => {
-  test("answers once with the exit code, stdout and stderr apart", async () => {
-    const res = await exec(await newSandbox(), ["sh", "-c", "echo out; echo oops >&2; exit 3"]);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type") ?? "", /^application\/json/);
-    assert.deepEqual(res.data, { exitCode: 3, stdout: "out\n", stderr: "oops\n", truncated: false });
-  });
+  const read = (id: string, cid: string) => api("GET", `/sandboxes/${id}/commands/${cid}`);
+  const stop = (id: string, cid: string) => api("POST", `/sandboxes/${id}/commands/${cid}/stop`, {});
+  // Reads the command every 100 ms until it has exited.
+  async function ended(id: string, cid: string) {
+    for (;;) {
+      const res = await read(id, cid);
+      assert.equal(res.status, 200, res.text);
+      if (res.data.state === "exited") return res.data;
+      await sleep(100);
+    }
+  }
+  // The lines of a followed output, each with the time it arrived.
+  async function timed(id: string, cid: string) {
+    const res = await fetch(`${BASE}/sandboxes/${id}/commands/${cid}/output?follow=true`, { headers: KEY ? { authorization: `Bearer ${KEY}` } : {} });
+    const got: { line: any; at: number }[] = [];
+    let rest = "";
+    for await (const chunk of res.body!.pipeThrough(new TextDecoderStream())) {
+      const parts = (rest + chunk).split("\n");
+      rest = parts.pop()!;
+      for (const part of parts) if (part) got.push({ line: JSON.parse(part), at: performance.now() });
+    }
+    return got;
+  }
 
-  test("cuts an output past 10 MB and says so", async () => {
-    const res = await exec(await newSandbox(), ["sh", "-c", "head -c 11000000 /dev/zero | tr '\\0' a"]);
-    assert.equal(res.data.exitCode, 0);
-    assert.equal(res.data.truncated, true);
-    assert.equal(res.data.stdout.length, 10 * 1024 * 1024);
-  });
-
-  test("with stream, sends stdout, then the exit code", async () => {
-    const res = await execStream(await newSandbox(), ["sh", "-c", "echo ok"]);
-    assert.equal(res.status, 200);
-    assert.equal(res.headers.get("content-type"), "application/x-ndjson");
-    assert.deepEqual(lines(res.text), [{ stream: "stdout", data: "ok\n" }, { exitCode: 0 }]);
-  });
-
-  test("with stream, keeps stderr apart and returns a failing exit code", async () => {
-    const res = await execStream(await newSandbox(), ["sh", "-c", "echo oops >&2; exit 3"]);
-    assert.deepEqual(lines(res.text), [{ stream: "stderr", data: "oops\n" }, { exitCode: 3 }]);
-  });
-
-  test("with stream, sends each chunk as it comes, not at the end", async () => {
+  test("starts at once, then answers the state and the whole output", { timeout: 30_000 }, async () => {
     const id = await newSandbox();
-    const started = performance.now();
-    const res = await fetch(`${BASE}/sandboxes/${id}/exec`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(KEY ? { authorization: `Bearer ${KEY}` } : {}) },
-      body: JSON.stringify({ cmd: ["sh", "-c", "echo first; sleep 2; echo second"], stream: true }),
-    });
-    const reader = res.body!.getReader();
-    await reader.read();
-    const first = performance.now() - started;
-    while (!(await reader.read()).done);
-    const total = performance.now() - started;
-    assert.ok(total - first > 1500, `first chunk after ${Math.round(first)} ms, end after ${Math.round(total)} ms`);
+    const cmd = ["sh", "-c", "echo out; sleep 0.2; echo err >&2; sleep 1; exit 3"];
+    const res = await start(id, cmd);
+    assert.equal(res.status, 201);
+    assert.match(res.data.id, /^[0-9a-f]{12}$/);
+    const cid = res.data.id;
+    assert.equal(res.headers.get("location"), `/sandboxes/${id}/commands/${cid}`);
+    const now = await read(id, cid);
+    assert.equal(now.data.state, "running");
+    assert.equal(now.data.exitCode, null);
+    const end = await ended(id, cid);
+    assert.deepEqual(end, { id: cid, cmd, state: "exited", exitCode: 3, outputSize: 8 });
+    const out = await output(id, cid, 0, false);
+    assert.equal(out.headers.get("content-type"), "application/x-ndjson");
+    assert.deepEqual(out.lines, [
+      { stream: "stdout", data: "out\n", next: 4 },
+      { stream: "stderr", data: "err\n", next: 8 },
+      { exitCode: 3, next: end.outputSize },
+    ]);
+  });
+
+  test("follow sends each line as it comes, then the exit code", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const { data } = await start(id, ["sh", "-c", "for i in 1 2 3; do echo $i; sleep 0.5; done"]);
+    const got = await timed(id, data.id);
+    assert.deepEqual(
+      got.map(({ line }) => line),
+      [
+        { stream: "stdout", data: "1\n", next: 2 },
+        { stream: "stdout", data: "2\n", next: 4 },
+        { stream: "stdout", data: "3\n", next: 6 },
+        { exitCode: 0, next: 6 },
+      ],
+    );
+    assert.ok(got[2].at - got[0].at > 700, `lines 1 and 3 ${Math.round(got[2].at - got[0].at)} ms apart`);
+  });
+
+  test("from=next of a line answers only what follows", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    // Two streams, since the following chunks of one stream come back as one line.
+    const { data } = await start(id, ["sh", "-c", "echo a; sleep 0.2; echo b >&2"]);
+    await ended(id, data.id);
+    const first = (await output(id, data.id, 0, false)).lines[0];
+    assert.deepEqual(first, { stream: "stdout", data: "a\n", next: 2 });
+    assert.deepEqual((await output(id, data.id, first.next, false)).lines, [
+      { stream: "stderr", data: "b\n", next: 4 },
+      { exitCode: 0, next: 4 },
+    ]);
+  });
+
+  test("each command keeps its own exit code, among orphans", { timeout: 60_000 }, async () => {
+    const id = await newSandbox();
+    const codes = Array.from({ length: 20 }, (_, i) => i + 1);
+    // Each one leaves two sleeps to PID 1, collected by the same reaper as the commands.
+    const orphans = Array.from({ length: 5 }, () => exec(id, ["sh", "-c", "(sleep 0.3 &); (sleep 0.4 &); true"]));
+    const runs = await Promise.all(codes.map((n) => exec(id, ["sh", "-c", `sleep 0.5; exit ${n}`])));
+    await Promise.all(orphans);
+    assert.deepEqual(
+      runs.map((run) => run.data.exitCode),
+      codes,
+    );
+  });
+
+  test("runs in its own process group, with its id in PARPAING_EXEC", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const { data } = await start(id, ["sh", "-c", 'echo $PARPAING_EXEC; cut -d" " -f5 /proc/$$/stat; echo $$']);
+    const out = (await output(id, data.id)).lines.map((line) => line.data ?? "").join("");
+    const [cid, group, pid] = out.trim().split("\n");
+    assert.equal(cid, data.id);
+    assert.equal(group, pid);
+  });
+
+  test("cuts a long output in lines of at most 64 KiB, never inside a character", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const { data } = await start(id, ["sh", "-c", "yes é | head -n 70000 | tr -d '\\n'"]);
+    const out = await output(id, data.id);
+    const pieces = out.lines.filter((line) => line.stream);
+    assert.ok(pieces.length > 1);
+    for (const piece of pieces) assert.ok(Buffer.byteLength(piece.data) <= 65536, `${Buffer.byteLength(piece.data)} bytes`);
+    assert.equal(pieces.map((piece) => piece.data).join(""), "é".repeat(70000));
+    assert.deepEqual(out.lines.at(-1), { exitCode: 0, next: 140000 });
+  });
+
+  test("past 100 MiB, keeps the end of the output and says what is skipped", { timeout: 120_000 }, async () => {
+    const id = await newSandbox();
+    const total = 130_000_000;
+    const { data } = await start(id, ["sh", "-c", `head -c ${total} /dev/zero | tr '\\0' a`]);
+    // Waits for the end from the end: nothing to pull.
+    assert.deepEqual((await output(id, data.id, total)).lines, [{ exitCode: 0, next: total }]);
+    assert.equal((await read(id, data.id)).data.outputSize, total);
+    assert.equal(stdout((await exec(id, ["ls", `/tmp/parpaing/${data.id}`])).text), "stderr\nstderr.1\nstdout\nstdout.1\n");
+    // Only the first two lines from 0, then the connection is cut: no 80 MB through the test.
+    const res = await fetch(`${BASE}/sandboxes/${id}/commands/${data.id}/output?from=0`, { headers: KEY ? { authorization: `Bearer ${KEY}` } : {} });
+    const got: any[] = [];
+    let rest = "";
+    for await (const chunk of res.body!.pipeThrough(new TextDecoderStream())) {
+      const parts = (rest + chunk).split("\n");
+      rest = parts.pop()!;
+      got.push(...parts.map((part) => JSON.parse(part)));
+      if (got.length >= 2) break;
+    }
+    const [skipped, first] = got;
+    const MiB50 = 50 * 1024 * 1024;
+    assert.deepEqual(Object.keys(skipped).sort(), ["next", "skipped"]);
+    assert.equal(skipped.next, skipped.skipped);
+    assert.ok(skipped.skipped >= MiB50 && skipped.skipped <= total - MiB50, `skipped ${skipped.skipped}`);
+    assert.equal(first.stream, "stdout");
+    assert.match(first.data, /^a+$/);
+    assert.equal(first.next, skipped.next + first.data.length);
+  });
+
+  test("keeps the last 50 finished commands", { timeout: 180_000 }, async () => {
+    const id = await newSandbox();
+    const ids: string[] = [];
+    // Each one read to its exit code, so finished before the next starts.
+    for (let i = 0; i < 51; i++) {
+      const { data } = await start(id, ["true"]);
+      ids.push(data.id);
+      assert.equal((await output(id, data.id)).lines.at(-1).exitCode, 0);
+    }
+    // The next start removes the oldest finished one.
+    const last = (await start(id, ["true"])).data.id;
+    for (const res of [await read(id, ids[0]), await output(id, ids[0])]) {
+      assert.equal(res.status, 404);
+      assert.deepEqual(res.data, { error: "unknown command" });
+    }
+    const list = await api("GET", `/sandboxes/${id}/commands`);
+    assert.deepEqual(
+      list.data.map((item: { id: string }) => item.id),
+      [...ids.slice(1), last],
+    );
+  });
+
+  test("ends with its main process, while what it left behind keeps writing", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const { data } = await start(id, ["sh", "-c", "(sleep 1; echo late) & echo early"]);
+    const out = await output(id, data.id);
+    assert.deepEqual(out.lines, [
+      { stream: "stdout", data: "early\n", next: 6 },
+      { exitCode: 0, next: 6 },
+    ]);
+    await sleep(1500);
+    assert.equal((await output(id, data.id, 6, false)).lines[0].data, "late\n");
+  });
+
+  test("stop ends the process group with SIGTERM, or SIGKILL 10 s later", { timeout: 40_000 }, async () => {
+    const id = await newSandbox();
+    const term = await start(id, ["sh", "-c", "sleep 300 & sleep 300"]);
+    let since = performance.now();
+    const stopped = await stop(id, term.data.id);
+    assert.equal(stopped.status, 202);
+    assert.deepEqual(stopped.data, {});
+    assert.equal((await ended(id, term.data.id)).exitCode, 143);
+    assert.ok(performance.now() - since < 3000, `exited after ${Math.round(performance.now() - since)} ms`);
+
+    const deaf = await start(id, ["sh", "-c", 'trap "" TERM; sleep 300']);
+    await sleep(300);
+    since = performance.now();
+    assert.equal((await stop(id, deaf.data.id)).status, 202);
+    assert.equal((await ended(id, deaf.data.id)).exitCode, 137);
+    const waited = performance.now() - since;
+    assert.ok(waited > 9000 && waited < 14000, `killed after ${Math.round(waited)} ms`);
+  });
+
+  test("lists the commands in start order", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const ids: string[] = [];
+    for (const cmd of [["true"], ["sleep", "5"], ["false"]]) ids.push((await start(id, cmd)).data.id);
+    const res = await api("GET", `/sandboxes/${id}/commands`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(
+      res.data.map((item: { id: string }) => item.id),
+      ids,
+    );
+    assert.deepEqual(res.data[1], { id: ids[1], cmd: ["sleep", "5"], state: "running", exitCode: null });
+  });
+
+  test("without follow, a running command's output ends with next alone", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    const { data } = await start(id, ["sleep", "5"]);
+    assert.deepEqual((await output(id, data.id, 0, false)).lines, [{ next: 0 }]);
+  });
+
+  test("refuses an unknown command, a bad position, a missing program and an unknown sandbox", { timeout: 30_000 }, async () => {
+    const id = await newSandbox();
+    for (const cid of ["000000000000", "nothex"]) {
+      for (const res of [await read(id, cid), await output(id, cid), await stop(id, cid)]) {
+        assert.equal(res.status, 404);
+        assert.deepEqual(res.data, { error: "unknown command" });
+      }
+    }
+    const { data } = await start(id, ["true"]);
+    const bad = await output(id, data.id, -1);
+    assert.equal(bad.status, 400);
+    assert.match(bad.data.error, /^from: /);
+    const missing = await start(id, ["/nope"]);
+    assert.equal(missing.status, 400);
+    assert.match(missing.data.error, /nope/);
+    for (const sandbox of ["000000000000", "nothex"]) {
+      const res = await start(sandbox, ["true"]);
+      assert.equal(res.status, 404);
+      assert.deepEqual(res.data, { error: "unknown sandbox" });
+      assert.equal((await api("GET", `/sandboxes/${sandbox}/commands`)).status, 404);
+    }
+  });
+
+  test("the daemon's file descriptors stay out of reach", { timeout: 30_000 }, async () => {
+    const res = await exec(await newSandbox(), ["readlink", "/proc/1/fd/0"]);
+    assert.notEqual(res.data.exitCode, 0);
   });
 
   test("refuses a missing or malformed command with an example", async () => {
     const id = await newSandbox();
     for (const cmd of [undefined, [], [1], "ls"]) {
-      const res = await exec(id, cmd);
+      const res = await start(id, cmd);
       assert.equal(res.status, 400);
       assert.equal(res.data.error, 'cmd: a command as an array, for example ["ls", "-la"]');
     }
-    const stream = await api("POST", `/sandboxes/${id}/exec`, { cmd: ["true"], stream: "yes" });
-    assert.equal(stream.status, 400);
-    assert.match(stream.data.error, /^stream: /);
   });
 
   test("root keeps only the 9 capabilities parpaing grants, for good", async () => {
@@ -291,14 +508,6 @@ describe("commands", () => {
     const res = await exec(await newSandbox(), ["sh", "-c", "grep -E '^Cap(Eff|Bnd):' /proc/self/status"]);
     const status = Object.fromEntries(stdout(res.text).trim().split("\n").map((line: string) => line.split(/:\s+/)));
     assert.deepEqual(status, { CapEff: "00000000200004fb", CapBnd: "00000000200004fb" });
-  });
-
-  test("refuses an unknown sandbox", async () => {
-    for (const id of ["000000000000", "nothex"]) {
-      const res = await exec(id, ["true"]);
-      assert.equal(res.status, 404);
-      assert.deepEqual(res.data, { error: "unknown sandbox" });
-    }
   });
 });
 
@@ -440,7 +649,16 @@ describe("API reference", () => {
     const res = await fetch(`${BASE}/openapi.json`);
     const spec = await res.json();
     assert.deepEqual(spec.servers, [{ url: "/" }]);
-    assert.deepEqual(Object.keys(spec.paths).sort(), ["/info", "/sandboxes", "/sandboxes/{id}", "/sandboxes/{id}/archive", "/sandboxes/{id}/exec"]);
+    assert.deepEqual(Object.keys(spec.paths).sort(), [
+      "/info",
+      "/sandboxes",
+      "/sandboxes/{id}",
+      "/sandboxes/{id}/archive",
+      "/sandboxes/{id}/commands",
+      "/sandboxes/{id}/commands/{cid}",
+      "/sandboxes/{id}/commands/{cid}/output",
+      "/sandboxes/{id}/commands/{cid}/stop",
+    ]);
   });
 
   test("/docs loads Scalar under the strict CSP", async () => {

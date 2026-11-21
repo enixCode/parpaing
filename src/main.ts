@@ -1,5 +1,5 @@
 // parpaing: the HTTP API for sandboxes and their commands, on port 8090 behind the nginx gateway (gateway/). This file answers
-// the routes declared in routes.ts (what each one accepts and answers); Docker lives in sandboxes.ts, exec.ts and archive.ts.
+// the routes declared in routes.ts (what each one accepts and answers); Docker lives in sandboxes.ts, relay.ts and archive.ts.
 import { Readable } from "node:stream";
 import { serve } from "@hono/node-server";
 import { OpenAPIHono } from "@hono/zod-openapi";
@@ -8,17 +8,18 @@ import { HTTPException } from "hono/http-exception";
 import { stream } from "hono/streaming";
 import { readFolder, writeFolder } from "./archive.ts";
 import { DAEMON_VOLUME, installDaemon } from "./daemon.ts";
-import { startCommand } from "./exec.ts";
 import { followEgress } from "./network.ts";
+import * as commands from "./relay.ts";
 import * as routes from "./routes.ts";
-import { UNKNOWN } from "./routes.ts";
+import { UNKNOWN, UNKNOWN_COMMAND } from "./routes.ts";
 import * as sandboxes from "./sandboxes.ts";
 
 const app = new OpenAPIHono({
-  // A refused request gets one sentence saying what to send; an id that cannot exist is an unknown sandbox.
+  // A refused request gets one sentence saying what to send; an id that cannot exist is an unknown sandbox, a command id
+  // that cannot exist an unknown command.
   defaultHook: (result, c) => {
     if (result.success) return;
-    if (result.target === "param") return c.json(UNKNOWN, 404);
+    if (result.target === "param") return c.json(result.error.issues.some((issue) => issue.path[0] === "id") ? UNKNOWN : UNKNOWN_COMMAND, 404);
     return c.json({ error: result.error.issues[0].message }, 400);
   },
 });
@@ -58,45 +59,46 @@ app.openapi(routes.getSandbox, async (c) => {
 
 app.openapi(routes.deleteSandbox, async (c) => ((await sandboxes.remove(c.req.valid("param").id)) ? c.body(null, 204) : c.json(UNKNOWN, 404)));
 
-// Runs a command. By default, one JSON answer when it ends: its exit code, stdout and stderr, each cut past 10 MB (then
-// truncated is true) so a command printing gigabytes cannot fill parpaing's memory. With stream: true, the output goes live:
-// one JSON line per chunk, then the exit code. Refusals (400, 404, 409) come first; a client that leaves does not stop the command.
-const MAX_OUTPUT = 10 * 1024 * 1024;
-app.openapi(routes.runCommand, async (c) => {
-  const { cmd, stream: live = false } = c.req.valid("json");
-  const container = await sandboxes.running(c.req.valid("param").id);
-  const follow = await startCommand(container, cmd);
+// Commands run by the sandbox's daemon: started at once, read and stopped by id. A client that leaves does not stop them.
+app.openapi(routes.startCommand, async (c) => {
+  const { id } = c.req.valid("param");
+  const started = await commands.startCommand(id, c.req.valid("json").cmd);
+  c.header("location", `/sandboxes/${id}/commands/${started.id}`);
+  return c.json(started, 201);
+});
 
-  if (!live) {
-    const output = { stdout: "", stderr: "" };
-    let truncated = false;
-    const exitCode = await follow((name, data) => {
-      const room = MAX_OUTPUT - output[name].length;
-      if (data.length > room) truncated = true;
-      output[name] += data.slice(0, Math.max(room, 0));
-    });
-    return c.json({ exitCode, ...output, truncated }, 200);
-  }
+app.openapi(routes.listCommands, async (c) => c.json(await commands.listCommands(c.req.valid("param").id), 200));
 
+app.openapi(routes.readCommand, async (c) => {
+  const { id, cid } = c.req.valid("param");
+  return c.json(await commands.readCommand(id, cid), 200);
+});
+
+app.openapi(routes.stopCommand, async (c) => {
+  const { id, cid } = c.req.valid("param");
+  return c.json(await commands.stopCommand(id, cid), 202);
+});
+
+// The output goes to the client line by line as the daemon sends it; refusals (400, 404, 409, 503) come before the first
+// line. A client that leaves closes the relay, not the command.
+app.openapi(routes.readOutput, async (c) => {
+  const { id, cid } = c.req.valid("param");
+  const { from = 0, follow } = c.req.valid("query");
+  const output = await commands.openOutput(id, cid, from, follow === "true", c.req.raw.signal);
   c.header("content-type", "application/x-ndjson");
-  const line = (value: unknown) => JSON.stringify(value) + "\n";
   // zod-openapi expects a typed JSON answer for any content type with "json" in it, x-ndjson included;
-  // the stream is a plain Response, described by ExecLine in routes.ts, hence the cast.
-  return stream(
-    c,
-    async (out) => {
-      const exitCode = await follow((name, data) => void out.write(line({ stream: name, data })));
-      await out.write(line({ exitCode }));
-    },
-    async (error, out) => void (await out.write(line({ error: error.message }))),
-  ) as never;
+  // the stream is a plain Response, described by OutputLine in routes.ts, hence the cast.
+  return stream(c, async (out) => {
+    out.onAbort(output.close);
+    for await (const line of output.lines) await out.write(JSON.stringify(line) + "\n");
+  }) as never;
 });
 
 // A folder out as a tar stream, or a tar stream unpacked into a folder. Refusals come before the first byte.
 app.openapi(routes.readArchive, async (c) => {
   const container = await sandboxes.running(c.req.valid("param").id);
   const archive = await readFolder(container, c.req.valid("query").path);
-  // A tar stream, not the JSON zod-openapi expects: the same cast as the exec stream.
+  // A tar stream, not the JSON zod-openapi expects: the same cast as the output stream.
   return c.body(Readable.toWeb(archive) as ReadableStream, 200, { "content-type": "application/x-tar" }) as never;
 });
 
