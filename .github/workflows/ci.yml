@@ -79,6 +79,10 @@ jobs:
         with:
           node-version: 26
 
+      # The tests restart a sandbox through Docker with dockerode.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       # The official install: the release archive checked by its SHA-512, then runsc registers itself in Docker's daemon.json.
       - name: Install gVisor
         run: |
