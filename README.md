@@ -52,7 +52,7 @@ PARPAING_ADDRESS=0.0.0.0 PARPAING_API_KEY=<key> PARPAING_HOSTS=<server IP or dom
 
 - **`PARPAING_API_KEY`**: required once exposed (`PARPAING_ADDRESS` other than `127.0.0.1`, `localhost`, `::1`), parpaing does not start without it. A long random string: `openssl rand -hex 32`. The page asks for it.
 - **`PARPAING_HOSTS`**: the gateway answers only for `localhost`, `127.0.0.1` and these names (space-separated).
-- **Plain HTTP**: the key crosses the network in clear. HTTPS is planned, see the [roadmap](ROADMAP.md).
+- **Plain HTTP**: the key crosses the network in clear. For TLS, put a reverse proxy in front (Caddy, nginx).
 
 ## API
 

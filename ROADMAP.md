@@ -54,22 +54,21 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 35 | SSH (to decide) | `ssh <id>@host` through a gateway, no SSH server in the sandbox. How, and whether we want it, is still open | 2.x | ⚪ Planned |
 | 36 | Allowed domains | Per sandbox, or block everything, fixed at creation | 2.x | ⚪ Planned |
 | 37 | Preview URLs | Open a sandbox port in the browser | 2.x | ⚪ Planned |
-| 38 | HTTPS | To expose the server safely | 2.x | ⚪ Planned |
-| 39 | Metrics | Prometheus and OpenTelemetry | 2.x | ⚪ Planned |
-| 40 | SDK | TypeScript on npm (`npm install parpaing`), released with each version; Python next | 2.x | 🟡 In progress |
-| 41 | CLI | Drive parpaing from a terminal | 2.x | ⚪ Planned |
-| 42 | MCP server | Agents call parpaing directly | 2.x | ⚪ Planned |
-| 43 | Snapshots | Turn a sandbox into a reusable image | 3.x | ⚪ Planned |
-| 44 | Image builder | Build a sandbox image from code, cached | 3.x | ⚪ Planned |
-| 45 | Ready pool | Sandboxes created in advance, for instant starts | 3.x | ⚪ Planned |
-| 46 | Code runner | Run Python or JavaScript, keeping state | 3.x | ⚪ Planned |
-| 47 | Shared volumes | Storage shared by several sandboxes | 3.x | ⚪ Planned |
-| 48 | Artifacts | Collect what an agent produced, with a signed link | 3.x | ⚪ Planned |
-| 49 | Secrets | Variables injected without being readable | 3.x | ⚪ Planned |
-| 50 | Webhooks | Notify a URL when something happens, best effort | 3.x | ⚪ Planned |
-| 51 | Kata Containers | A small VM per sandbox | 3.x | ⚪ Planned |
-| 52 | GPU | Graphics cards in a sandbox | 4.x | ⚪ Planned |
-| 53 | Desktop | Screen, mouse and keyboard for computer-use agents | 4.x | ⚪ Planned |
-| 54 | Private registries | Pull images that need a login, if people ask for it | On request | ⚪ Planned |
+| 38 | Metrics | Prometheus and OpenTelemetry | 2.x | ⚪ Planned |
+| 39 | SDK | TypeScript on npm (`npm install parpaing`), released with each version; Python next | 2.x | 🟡 In progress |
+| 40 | CLI | Drive parpaing from a terminal | 2.x | ⚪ Planned |
+| 41 | MCP server | Agents call parpaing directly | 2.x | ⚪ Planned |
+| 42 | Snapshots | Turn a sandbox into a reusable image | 3.x | ⚪ Planned |
+| 43 | Image builder | Build a sandbox image from code, cached | 3.x | ⚪ Planned |
+| 44 | Ready pool | Sandboxes created in advance, for instant starts | 3.x | ⚪ Planned |
+| 45 | Code runner | Run Python or JavaScript, keeping state | 3.x | ⚪ Planned |
+| 46 | Shared volumes | Storage shared by several sandboxes | 3.x | ⚪ Planned |
+| 47 | Artifacts | Collect what an agent produced, with a signed link | 3.x | ⚪ Planned |
+| 48 | Secrets | Variables injected without being readable | 3.x | ⚪ Planned |
+| 49 | Webhooks | Notify a URL when something happens, best effort | 3.x | ⚪ Planned |
+| 50 | Kata Containers | A small VM per sandbox | 3.x | ⚪ Planned |
+| 51 | GPU | Graphics cards in a sandbox | 4.x | ⚪ Planned |
+| 52 | Desktop | Screen, mouse and keyboard for computer-use agents | 4.x | ⚪ Planned |
+| 53 | Private registries | Pull images that need a login, if people ask for it | On request | ⚪ Planned |
 
 
