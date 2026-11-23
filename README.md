@@ -34,6 +34,9 @@ The API reference is at <http://127.0.0.1:8090/docs>.
 
 Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. Without it, anyone who reaches the port can use the API.
 
+- **Exposed beyond this machine** (`PARPAING_ADDRESS` other than `127.0.0.1`, `localhost`, `::1`): `PARPAING_API_KEY` is required, parpaing does not start without it.
+- **Host names**: the gateway answers only for `localhost`, `127.0.0.1` and the names in `PARPAING_HOSTS` (space-separated: a domain, the machine's IP).
+
 ## API
 
 | Feature | Endpoint | What it does | Status |
@@ -138,7 +141,7 @@ Planned for 2.x, see the [roadmap](ROADMAP.md).
 - **A sandbox is a Docker container** labelled `parpaing.sandbox`. Parpaing never touches other containers.
 - **Always on**: the container runs the parpaing daemon, mounted read-only, and waits for commands: any image works, even one without a shell. It starts again with Docker, with its files but not its processes.
 - **Commands through the daemon**: parpaing reaches it with `docker exec`, never through the network. Details in [DEV.md](DEV.md).
-- **Its own network**: each sandbox sits alone in an internal network. Its only way out is the egress proxy (GOST), which refuses the host, the local network, cloud metadata and other sandboxes. Programs find it in `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`; ssh with `-o ProxyCommand='nc -X connect -x $PARPAING_PROXY %h %p'`. Programs that ignore proxies (`psql`) need `proxychains` or an ssh tunnel.
+- **Its own network**: each sandbox sits alone in an internal network. Its only way out is the egress proxy (GOST), which refuses the host (its own addresses included, `PARPAING_BLOCK` for others), the local network, cloud metadata and other sandboxes. Programs find it in `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`; ssh with `-o ProxyCommand='nc -X connect -x $PARPAING_PROXY %h %p'`. Programs that ignore proxies (`psql`) need `proxychains` or an ssh tunnel.
 - **No state in Parpaing**: Docker keeps everything.
 - **One port**: the `gateway` container (nginx) serves the web page and the brand kit, and relays the API. The `parpaing` container also works without the page; sandboxes with internet need the `egress` container.
 

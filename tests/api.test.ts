@@ -3,6 +3,8 @@
 // Each test deletes the sandboxes it creates, and only those.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { request } from "node:http";
+import { PassThrough } from "node:stream";
 import { after, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import Docker from "dockerode";
@@ -85,6 +87,16 @@ async function exec(id: string, cmd: unknown, allowed: number[] = []) {
   throw new Error(`the output of ${JSON.stringify(cmd)} kept breaking`);
 }
 
+// The stdout of a Docker stream (attach or exec), whole once the stream ends.
+async function dockerStdout(docker: Docker, stream: NodeJS.ReadableStream) {
+  const out = new PassThrough();
+  let text = "";
+  out.on("data", (chunk) => (text += chunk));
+  docker.modem.demuxStream(stream, out, new PassThrough());
+  await new Promise((resolve) => stream.on("end", resolve));
+  return text;
+}
+
 after(async () => {
   for (const id of created) await api("DELETE", `/sandboxes/${id}`);
 });
@@ -103,6 +115,19 @@ describe("sandboxes", () => {
     assert.equal((await api("DELETE", `/sandboxes/${id}`)).status, 204);
     assert.equal((await api("GET", `/sandboxes/${id}`)).status, 404);
     assert.deepEqual((await api("DELETE", `/sandboxes/${id}`)).data, { error: "unknown sandbox" });
+  });
+
+  test("delete takes the image's anonymous volumes along", async () => {
+    const res = await api("POST", "/sandboxes", { image: "redis:7.4-alpine" });
+    assert.equal(res.status, 201);
+    created.push(res.data.id);
+    const docker = new Docker();
+    // redis declares VOLUME /data, which Docker fills with an anonymous volume; the daemon's volume is a named one.
+    const { Mounts } = await docker.getContainer(res.data.id).inspect();
+    const volume = Mounts.find((mount) => mount.Type === "volume" && mount.Destination === "/data")?.Name;
+    assert.ok(volume, "no anonymous volume on /data");
+    assert.equal((await api("DELETE", `/sandboxes/${res.data.id}`)).status, 204);
+    await assert.rejects(docker.getVolume(volume).inspect(), { statusCode: 404 });
   });
 
   test("refuses a bad image name with an example", async () => {
@@ -614,6 +639,34 @@ describe("network", () => {
     }
   });
 
+  test("the proxy refuses the host's own public addresses", async (t) => {
+    const docker = new Docker();
+    const egress = docker.getContainer("parpaing-egress");
+    const info = await egress.inspect().catch(() => undefined);
+    if (!info) return t.skip("no parpaing-egress container");
+    // The host's IPv4 addresses, as parpaing reads them: the proxy's image on the host network, under runc.
+    const reader = await docker.createContainer({
+      Image: info.Image,
+      Entrypoint: ["ip"],
+      Cmd: ["-4", "-o", "addr", "show"],
+      HostConfig: { NetworkMode: "host", Runtime: "runc", AutoRemove: true },
+    });
+    const attached = dockerStdout(docker, await reader.attach({ stream: true, stdout: true, stderr: true }));
+    await reader.start();
+    // The ranges egress/egress.sh refuses already.
+    const ranges = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4"];
+    const toInt = (ip: string) => ip.split(".").reduce((n, part) => n * 256 + Number(part), 0);
+    const inRange = (ip: string, cidr: string) => {
+      const size = 2 ** (32 - Number(cidr.split("/")[1]));
+      return Math.floor(toInt(ip) / size) === Math.floor(toInt(cidr.split("/")[0]) / size);
+    };
+    const addresses = [...(await attached).matchAll(/inet (\d+\.\d+\.\d+\.\d+)\//g)].map((match) => match[1]).filter((ip) => !ranges.some((cidr) => inRange(ip, cidr)));
+    if (!addresses.length) return t.skip("the host has no public IPv4 address");
+    const exec = await egress.exec({ Cmd: ["iptables", "-S", "OUTPUT"], User: "root", AttachStdout: true, AttachStderr: true });
+    const rules = await dockerStdout(docker, await exec.start({}));
+    for (const ip of addresses) assert.match(rules, new RegExp(`^-A OUTPUT -d ${ip.replaceAll(".", "\\.")}/32 -j REJECT`, "m"), ip);
+  });
+
   test("none gives no network at all", async () => {
     const res = await api("POST", "/sandboxes", { network: "none" });
     assert.equal(res.status, 201);
@@ -701,6 +754,23 @@ describe("requests", () => {
 
   test("an unknown route says so", async () => {
     assert.deepEqual((await api("GET", "/nope")).data, { error: "unknown route" });
+  });
+
+  // The gateway's check, like the /docs headers: it fails against a parpaing without the gateway in front.
+  test("the gateway answers only for known host names", async () => {
+    // One GET with its own Host header, which fetch cannot set: the status, or undefined when the connection closed unanswered.
+    const get = (host: string) =>
+      new Promise<number | undefined>((resolve) => {
+        request(`${BASE}/info`, { headers: { host, ...(KEY ? { authorization: `Bearer ${KEY}` } : {}) } }, (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        })
+          .on("error", () => resolve(undefined))
+          .end();
+      });
+    const status = await get("evil.example");
+    assert.ok(status === undefined || status < 200 || status >= 300, `evil.example: ${status}`);
+    assert.equal(await get(new URL(BASE).host), 200);
   });
 });
 

@@ -1,6 +1,15 @@
 # parpaing gateway, the only port: nginx serves the page, the API reference and the brand kit, and relays everything else to the API.
+# A template: at start, the nginx image fills in PARPAING_HOSTS (and only variables set in its environment) into conf.d/default.conf.
+
+# Any other host name gets no answer: a web page whose name resolves to this machine (DNS rebinding) cannot reach the API.
+server {
+  listen 80 default_server;
+  return 444;
+}
+
 server {
   listen 80;
+  server_name localhost 127.0.0.1 [::1] gateway ${PARPAING_HOSTS};
   charset utf-8;
   server_tokens off;
 

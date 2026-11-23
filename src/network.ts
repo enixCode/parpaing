@@ -1,7 +1,9 @@
 // Each sandbox sits alone in its own Docker internal network: no route out, no address on the host side, so no host, no LAN,
 // no cloud metadata, no other sandbox. Its only way out is the egress proxy (egress/), which has a leg in every sandbox
 // network at address .2 and refuses private destinations. Nothing is set on the host.
+import { PassThrough } from "node:stream";
 import Docker from "dockerode";
+import { exitCode } from "./exec.ts";
 
 const docker = new Docker();
 const EGRESS = "parpaing-egress";
@@ -86,9 +88,66 @@ async function reconnect() {
   }
 }
 
+// The ranges egress.sh refuses already: a host address inside them needs no rule of its own.
+const PRIVATE = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4"];
+const inRange = (ip: string, cidr: string) => {
+  const [base, bits] = cidr.split("/");
+  const size = 2 ** (32 - Number(bits));
+  return Math.floor(toInt(ip) / size) === Math.floor(toInt(base) / size);
+};
+
+// The host's IPv4 addresses, read by a short-lived container of the proxy's image on the host network. Always runc: under
+// gVisor, a container sees gVisor's network, not the host's.
+async function hostAddresses(image: string) {
+  const container = await docker.createContainer({
+    Image: image,
+    Entrypoint: ["ip"],
+    Cmd: ["-4", "-o", "addr", "show"],
+    HostConfig: { NetworkMode: "host", Runtime: "runc", AutoRemove: true },
+  });
+  // Attached before the start: the output arrives in full, and the stream ends with the container, gone at once (AutoRemove).
+  const stream = await container.attach({ stream: true, stdout: true, stderr: true });
+  const stdout = new PassThrough();
+  let text = "";
+  stdout.on("data", (chunk) => (text += chunk));
+  docker.modem.demuxStream(stream, stdout, new PassThrough());
+  const ended = new Promise((resolve) => stream.on("end", resolve));
+  await container.start();
+  await ended;
+  return [...text.matchAll(/inet (\d+\.\d+\.\d+\.\d+)\//g)].map((match) => match[1]);
+}
+
+// A sandbox must not reach the host through its public addresses, which the private ranges miss: the proxy refuses them too,
+// with the CIDRs of PARPAING_BLOCK. Rules added only when missing, in the proxy's own network namespace; without a proxy, nothing to do.
+async function blockHost() {
+  const egress = docker.getContainer(EGRESS);
+  const info = await egress.inspect().catch((error) => {
+    if (error.statusCode !== 404) throw error;
+  });
+  if (!info) return;
+  const extra = (process.env.PARPAING_BLOCK ?? "").split(",").map((cidr) => cidr.trim()).filter(Boolean);
+  const addresses = [...(await hostAddresses(info.Image)).filter((ip) => !PRIVATE.some((cidr) => inRange(ip, cidr))), ...extra];
+  if (!addresses.length) return;
+  const exec = await egress.exec({
+    Cmd: ["sh", "-c", 'for a; do iptables -w -C OUTPUT -d "$a" -j REJECT 2>/dev/null || iptables -w -A OUTPUT -d "$a" -j REJECT || exit 1; done', "sh", ...addresses],
+    User: "root",
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+  const stream = await exec.start({});
+  let errors = "";
+  const stderr = new PassThrough();
+  stderr.on("data", (chunk) => (errors += chunk));
+  docker.modem.demuxStream(stream, new PassThrough(), stderr);
+  await new Promise((resolve) => stream.on("end", resolve));
+  if ((await exitCode(exec)) !== 0) throw new Error(`cannot refuse the host's addresses: ${errors.trim()}`);
+}
+
 // At start, then each time the proxy starts.
 export async function followEgress() {
-  await reconnect().catch((error) => console.error(`egress: ${error.message}`));
+  const started = () =>
+    Promise.all([reconnect(), blockHost()].map((done) => done.catch((error) => console.error(`egress: ${error.message}`))));
+  await started();
   const events = await docker.getEvents({ filters: { container: [EGRESS], event: ["start"] } });
-  events.on("data", () => void reconnect().catch((error) => console.error(`egress: ${error.message}`)));
+  events.on("data", () => void started());
 }

@@ -65,11 +65,15 @@ export async function readFolder(container: Container, path: string) {
       if (size >= 512) stop();
     };
     frames.on("data", take);
-    ended.then(stop);
+    // A rejection too (the sandbox removed meanwhile): unhandled, it would end parpaing itself.
+    ended.then(stop, stop);
   });
   if (head.length < 512 || head.toString("latin1", 257, 262) !== "ustar") throw failure(await ended, frames.stderr, path);
   frames.unshift(head);
-  ended.then((code) => (code === 0 ? frames.end() : frames.destroy(new Error(`tar stopped with exit code ${code}`))));
+  ended.then(
+    (code) => (code === 0 ? frames.end() : frames.destroy(new Error(`tar stopped with exit code ${code}`))),
+    (error) => frames.destroy(error),
+  );
   return frames;
 }
 

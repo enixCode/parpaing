@@ -1,4 +1,4 @@
-# Use PARPAING_ADDRESS=0.0.0.0 to host on your public host ip
+# Use PARPAING_ADDRESS=0.0.0.0 to host on your public host ip: then PARPAING_API_KEY is required, and PARPAING_HOSTS lists the names it answers to.
 # The images come from ghcr.io. After changing the code, docker compose up -d --build builds them from this folder.
 services:
   parpaing:
@@ -11,6 +11,8 @@ services:
     environment:
       # Optional: when set, every API call needs Authorization: Bearer <key>.
       - PARPAING_API_KEY
+      # The address the gateway publishes the port on: anything but 127.0.0.1, localhost or ::1 needs PARPAING_API_KEY, or parpaing stops.
+      - PARPAING_ADDRESS
       # Optional: the engine of a sandbox that asks for none (runc). runsc (gVisor) once installed in Docker, see README.
       - PARPAING_RUNTIME
       # Optional: default ceilings per sandbox (memory and disk in MB): 1024, 1, 1024, 10240.
@@ -22,6 +24,8 @@ services:
       - PARPAING_RESERVED_MEMORY
       # Optional: the address range cut into one small network per sandbox (10.89.0.0/16, 4096 sandboxes).
       - PARPAING_SUBNETS
+      # Optional: more addresses the egress proxy refuses, comma-separated CIDRs (the host's own addresses are refused already).
+      - PARPAING_BLOCK
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       # The sandbox daemon: parpaing copies its binary here at start, every sandbox mounts this volume read-only.
@@ -49,6 +53,9 @@ services:
     restart: unless-stopped
     depends_on:
       - parpaing
+    environment:
+      # Optional: the host names it answers to besides localhost and 127.0.0.1, space-separated (a domain or an IP in front).
+      - PARPAING_HOSTS=${PARPAING_HOSTS:-}
     ports:
       - "${PARPAING_ADDRESS:-127.0.0.1}:8090:80"
 

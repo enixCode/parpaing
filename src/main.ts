@@ -14,6 +14,7 @@ import * as commands from "./relay.ts";
 import * as routes from "./routes.ts";
 import { UNKNOWN, UNKNOWN_COMMAND } from "./routes.ts";
 import * as sandboxes from "./sandboxes.ts";
+import { exposureError } from "./start.ts";
 
 const app = new OpenAPIHono({
   // A refused request gets one sentence saying what to send; an id that cannot exist is an unknown sandbox, a command id
@@ -26,8 +27,13 @@ const app = new OpenAPIHono({
 });
 
 // The API key is optional. With PARPAING_API_KEY, every call but /openapi.json needs Authorization: Bearer <key>;
-// without it, anyone who reaches the port can use the API.
+// without it, anyone who reaches the port can use the API. A port published beyond this machine (PARPAING_ADDRESS) needs one.
 const KEY = process.env.PARPAING_API_KEY;
+const exposed = exposureError(process.env.PARPAING_ADDRESS, KEY);
+if (exposed) {
+  console.error(exposed);
+  process.exit(1);
+}
 if (KEY) {
   const auth = bearerAuth({
     token: KEY,

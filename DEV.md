@@ -48,7 +48,15 @@ PARPAING_URL=http://127.0.0.1:18092 npm test
 docker rm -f parpaing-dev
 ```
 
-The gateway is not in front: the test of `/docs` security headers fails there, and only there.
+The gateway is not in front: the tests of `/docs` security headers and of host names fail there, and only there.
+
+## Gateway and egress proxy: what closes the way in and out
+
+- **Host names**: `gateway/default.conf.template`, filled in at start by the nginx image (only `PARPAING_HOSTS`, nginx's own `$` variables stay). A Host outside the list hits the `default_server`, which closes the connection (`444`): no DNS rebinding.
+- **Key check**: `src/start.ts`, run first by `main.ts`: an exposed `PARPAING_ADDRESS` without `PARPAING_API_KEY` stops parpaing (exit 1).
+- **The host's own addresses**: at start and on each start of `parpaing-egress` (`src/network.ts`), a short-lived container of the egress image on the host network, always under runc, runs `ip -4 -o addr show`.
+- **Rules**: its addresses outside the private ranges, plus `PARPAING_BLOCK`, become `REJECT` rules in the egress container's `OUTPUT` chain, by `docker exec`, added only when missing (`iptables -C || -A`).
+- **Failures**: logged as `egress: ...`, parpaing keeps running.
 
 ## The sandbox daemon (daemon/, Go)
 

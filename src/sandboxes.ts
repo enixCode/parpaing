@@ -132,7 +132,7 @@ export async function create({
     });
     // A container that does not start is removed.
     await container.start().catch(async (error) => {
-      await container.remove({ force: true });
+      await container.remove({ force: true, v: true });
       throw error.statusCode === 400 ? imageError(image, error) : error;
     });
     return { id: shortId(container.id), state: stateOf(true), runtime, network, ...limits };
@@ -201,11 +201,11 @@ export async function get(id: string) {
   };
 }
 
-// Returns false when the sandbox does not exist.
+// Returns false when the sandbox does not exist. Anonymous volumes (an image's VOLUME) go with the container, named ones never.
 export async function remove(id: string) {
   const found = await find(id);
   if (!found) return false;
-  await found.container.remove({ force: true });
+  await found.container.remove({ force: true, v: true });
   const network = found.info.Config.Labels?.[NETWORK_LABEL];
   if (network && network !== "none") await removeNetwork(network);
   return true;
