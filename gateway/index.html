@@ -81,6 +81,7 @@
   button:disabled { opacity: .55; cursor: default; }
   .field { display: flex; flex-wrap: wrap; gap: 8px; }
   .field input { flex: 1 1 180px; }
+  select { flex: none; padding: 8px 6px; border: 1px solid var(--edge); border-radius: 4px; background: var(--hole); color: inherit; font: 500 12px/1.6 var(--mono); }
 
   /* Messages and Aglo. */
   .note { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 8px 12px; border-left: 3px solid var(--blue); border-radius: 0 4px 4px 0; background: var(--raise); overflow-wrap: anywhere; }
@@ -221,6 +222,7 @@
           <label for="image">Image (optional)</label>
           <div class="field">
             <input id="image" placeholder="debian:trixie-slim" autocomplete="off" spellcheck="false" autofocus>
+            <select id="engine" aria-label="Engine" title="Engine" hidden><option value="">default engine</option></select>
             <button id="create-btn" class="main">Create sandbox</button>
           </div>
         </form>

@@ -11,6 +11,7 @@ keyField.hidden = !keyField.value;
 keyField.onchange = () => {
   try { localStorage.setItem("parpaing-api-key", keyField.value.trim()); } catch {}
   refresh();
+  engines();
 };
 const authorize = (headers) => (keyField.value.trim() ? { ...headers, authorization: `Bearer ${keyField.value.trim()}` } : headers);
 function askKey(status) {
@@ -286,6 +287,17 @@ $("exec").onsubmit = async (event) => {
   $("cmd").select();
 };
 
+// The engine list, from GET /info: shown only when this machine has a choice (runsc installed, for instance). Docker also
+// lists runc under its containerd name (io.containerd.runc.v2): the same engine, left out. "default engine" sends no
+// runtime, so PARPAING_RUNTIME decides.
+async function engines() {
+  const { status, data } = await call("GET", "/info");
+  const names = status === 200 ? data.engines.filter((name) => !name.startsWith("io.containerd.")) : [];
+  const select = $("engine");
+  select.replaceChildren(select.options[0], ...names.map((name) => new Option(name, name)));
+  select.hidden = names.length < 2;
+}
+
 $("create").onsubmit = async (event) => {
   event.preventDefault();
   const image = $("image").value.trim();
@@ -293,7 +305,8 @@ $("create").onsubmit = async (event) => {
   btn.disabled = creating = true;
   btn.textContent = "Creating…";
   note("create-note", `Creating a sandbox from ${image || "debian:trixie-slim"}. The first use of an image downloads it, which can take a while.`, "working");
-  const { status, data } = await call("POST", "/sandboxes", image ? { image } : {});
+  const runtime = $("engine").value;
+  const { status, data } = await call("POST", "/sandboxes", { ...(image && { image }), ...(runtime && { runtime }) });
   await refresh();
   btn.disabled = creating = false;
   btn.textContent = "Create sandbox";
@@ -325,3 +338,4 @@ $("clear").onclick = () => {
 };
 choose();
 refresh();
+engines();
