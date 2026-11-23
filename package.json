@@ -1,6 +1,6 @@
 {
   "name": "parpaing",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Self-hosted sandboxes for AI agents, driven by an HTTP API.",
   "license": "AGPL-3.0-only",
   "scripts": {

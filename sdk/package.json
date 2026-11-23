@@ -1,6 +1,6 @@
 {
   "name": "parpaing",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "TypeScript SDK for parpaing: self-hosted sandboxes for AI agents, driven by an HTTP API.",
   "license": "Apache-2.0",
   "type": "module",
