@@ -21,6 +21,8 @@ Website: <https://parpaing.dev>
 
 ## Quick start
 
+Needs Docker with Compose: [get Docker](https://docs.docker.com/get-started/get-docker/). On Linux, also [run Docker without sudo](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+
 ```sh
 curl -O https://raw.githubusercontent.com/enixCode/parpaing/main/compose.yml
 docker compose up -d
@@ -34,8 +36,23 @@ The API reference is at <http://127.0.0.1:8090/docs>.
 
 Set `PARPAING_API_KEY` to require `Authorization: Bearer <key>` on every call. Without it, anyone who reaches the port can use the API.
 
-- **Exposed beyond this machine** (`PARPAING_ADDRESS` other than `127.0.0.1`, `localhost`, `::1`): `PARPAING_API_KEY` is required, parpaing does not start without it.
-- **Host names**: the gateway answers only for `localhost`, `127.0.0.1` and the names in `PARPAING_HOSTS` (space-separated: a domain, the machine's IP).
+### On a server
+
+parpaing answers on `127.0.0.1` only. From your own machine, open an SSH tunnel, then go to <http://127.0.0.1:8090>:
+
+```sh
+ssh -L 8090:127.0.0.1:8090 <user>@<server>
+```
+
+To open the port to the network instead:
+
+```sh
+PARPAING_ADDRESS=0.0.0.0 PARPAING_API_KEY=<key> PARPAING_HOSTS=<server IP or domain> docker compose up -d
+```
+
+- **`PARPAING_API_KEY`**: required once exposed (`PARPAING_ADDRESS` other than `127.0.0.1`, `localhost`, `::1`), parpaing does not start without it. A long random string: `openssl rand -hex 32`. The page asks for it.
+- **`PARPAING_HOSTS`**: the gateway answers only for `localhost`, `127.0.0.1` and these names (space-separated).
+- **Plain HTTP**: the key crosses the network in clear. HTTPS is planned, see the [roadmap](ROADMAP.md).
 
 ## API
 
