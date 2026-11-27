@@ -57,7 +57,7 @@ app.use("*", async (c, next) => {
 
 app.openapi(routes.createSandbox, async (c) => c.json(await sandboxes.create(c.req.valid("json")), 201));
 
-app.openapi(routes.listSandboxes, async (c) => c.json(await sandboxes.list(), 200));
+app.openapi(routes.listSandboxes, async (c) => c.json(await sandboxes.list(c.req.valid("query")), 200));
 
 app.openapi(routes.getSandbox, async (c) => {
   const sandbox = await sandboxes.get(c.req.valid("param").id);

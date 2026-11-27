@@ -14,12 +14,17 @@ const WAIT_HELP = "wait: seconds to wait for free memory, a whole number from 0 
 const PATH_HELP = "path: an absolute folder path, for example /root/project";
 const RUNTIME_HELP = "runtime: an engine of this machine, for example runsc (GET /info lists them)";
 const NETWORK_HELP = 'network: "internet" (through the egress proxy) or "none"';
+const LABELS_HELP =
+  'labels: up to 32 key-value pairs, keys of 63 characters at most (letters, digits, ".", "_" or "-", starting with a letter or digit), values of 256 characters at most, for example {"user": "alice"}';
+const LABEL_HELP = "label: a key or key=value, repeatable, for example label=user=alice";
+const LABEL_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 
 const Problem = z.object({ error: z.string() }).openapi("Error");
 const Id = z.string().regex(/^[0-9a-f]{12}$/).openapi({ example: "3f9a2c7d1e4b" });
 const Params = z.object({ id: Id });
 const State = z.enum(["running", "stopped"]);
-const SandboxItem = z.object({ id: Id, state: State }).openapi("SandboxItem");
+const Labels = z.record(z.string(), z.string()).openapi({ description: "Fixed at creation; {} when none", example: { user: "alice" } });
+const SandboxItem = z.object({ id: Id, state: State, labels: Labels }).openapi("SandboxItem");
 const limit = (description: string) => z.number().nullable().openapi({ description: `${description}; null: no limit (created before limits)` });
 const Sandbox = z
   .object({
@@ -31,6 +36,7 @@ const Sandbox = z
     cpus: limit("CPUs"),
     processes: limit("Processes and threads"),
     disk: limit("Megabytes; enforced on runsc, only recorded on runc"),
+    labels: Labels,
   })
   .openapi("Sandbox");
 const whole = (help: string, min: number) => z.number({ error: help }).int({ error: help }).min(min, { error: help });
@@ -50,6 +56,25 @@ const NewSandbox = z.object({
   processes: whole(PROCESSES_HELP, 16).optional().openapi({ description: "1024 by default (PARPAING_PROCESSES)", example: 1024 }),
   disk: whole(DISK_HELP, 1).optional().openapi({ description: "Megabytes, 10240 by default (PARPAING_DISK). Enforced on runsc only", example: 20480 }),
   wait: whole(WAIT_HELP, 0).max(300, { error: WAIT_HELP }).optional().openapi({ description: "Seconds to wait if the machine lacks free memory, 0 by default", example: 30 }),
+  labels: z
+    .record(z.string().regex(LABEL_KEY, { error: LABELS_HELP }), z.string({ error: LABELS_HELP }).max(256, { error: LABELS_HELP }), { error: LABELS_HELP })
+    .refine((labels) => Object.keys(labels).length <= 32, { error: LABELS_HELP })
+    .optional()
+    .openapi({
+      description: "Up to 32 key-value pairs to find the sandbox by (GET /sandboxes?label=), fixed at creation",
+      example: { user: "alice" },
+      maxProperties: 32,
+      // propertyNames is OpenAPI 3.1, which the library's types leave out; the generator writes it as given.
+      ...{ propertyNames: { pattern: LABEL_KEY.source } },
+    }),
+});
+// A key alone, or key=value split on the first "=": the value may hold more.
+const LabelFilter = z.string({ error: LABEL_HELP }).regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}(=[\s\S]*)?$/, { error: LABEL_HELP });
+const ListQuery = z.object({
+  label: z
+    .union([LabelFilter, z.array(LabelFilter)], { error: LABEL_HELP })
+    .optional()
+    .openapi({ description: "key or key=value, repeatable: only the sandboxes carrying every one", example: "user=alice" }),
 });
 const Folder = z.object({ path: z.string({ error: PATH_HELP }).startsWith("/", { error: PATH_HELP }).openapi({ example: "/root/project" }) });
 const FROM_HELP = "from: a byte position in the output, 0 or more, for example 0";
@@ -123,7 +148,7 @@ export const createSandbox = createRoute({
   request: body(NewSandbox),
   responses: {
     201: json(Sandbox, "The sandbox, running"),
-    400: json(Problem, "An image Docker cannot use, an engine this machine lacks, or a limit it cannot give"),
+    400: json(Problem, "An image Docker cannot use, an engine this machine lacks, a limit it cannot give, or malformed labels"),
     415: NOT_JSON,
     503: json(Problem, "Not enough free memory on the machine, even after waiting"),
   },
@@ -134,7 +159,10 @@ export const listSandboxes = createRoute({
   path: "/sandboxes",
   summary: "List the sandboxes",
   tags: ["Sandboxes"],
-  responses: { 200: json(z.array(SandboxItem), "Every sandbox, running or stopped") },
+  description:
+    "Every sandbox, or with label only those carrying all the labels asked. Labels are fixed at creation. They find sandboxes, they protect none: the API key opens every sandbox.",
+  request: { query: ListQuery },
+  responses: { 200: json(z.array(SandboxItem), "The sandboxes, running or stopped"), 400: json(Problem, "A label filter malformed") },
 });
 
 export const getSandbox = createRoute({

@@ -34,6 +34,25 @@ const RESERVED = setting("PARPAING_RESERVED_MEMORY", 512);
 const MB = 1024 * 1024;
 // The disk limit is recorded on every engine; runsc enforces it (see create), runc and Kata cannot without host setup.
 const DISK_LABEL = "parpaing.disk";
+// The user labels, as one JSON label set on every new sandbox. Docker copies an image's own labels into its containers, but a
+// label set at creation wins over the image's: an image cannot add user labels. Docker labels are never visible inside.
+const LABELS = "parpaing.labels";
+type Labels = Record<string, string>;
+// None for a sandbox from before labels, or for a value parpaing did not write.
+function labelsOf(labels: Labels = {}): Labels {
+  try {
+    const parsed = JSON.parse(labels[LABELS] ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+// A filter is a key, or key=value split on the first "=" (the value may hold more).
+function matches(labels: Labels, filter: string) {
+  const at = filter.indexOf("=");
+  const key = at < 0 ? filter : filter.slice(0, at);
+  return Object.hasOwn(labels, key) && (at < 0 || labels[key] === filter.slice(at + 1));
+}
 
 // The machine's free memory. parpaing's own container has no memory limit, so /proc/meminfo shows the host's.
 function memoryAvailable() {
@@ -81,8 +100,9 @@ export async function create({
   wait = 0,
   runtime = RUNTIME,
   network = "internet",
+  labels = {},
   ...asked
-}: { image?: string; wait?: number; runtime?: string; network?: "internet" | "none" } & Partial<Limits>) {
+}: { image?: string; wait?: number; runtime?: string; network?: "internet" | "none"; labels?: Labels } & Partial<Limits>) {
   const limits = { ...DEFAULTS };
   for (const [key, value] of Object.entries(asked)) if (value !== undefined) limits[key as keyof Limits] = value;
   const gvisor = await fits(limits, runtime, wait);
@@ -92,7 +112,7 @@ export async function create({
   const options = {
     Image: image,
     Entrypoint: [DAEMON_PATH],
-    Labels: { [LABEL]: "", [DISK_LABEL]: String(limits.disk), [NETWORK_LABEL]: net?.name ?? "none", [DAEMON_LABEL]: "1" },
+    Labels: { [LABELS]: JSON.stringify(labels), [LABEL]: "",[DISK_LABEL]: String(limits.disk), [NETWORK_LABEL]: net?.name ?? "none", [DAEMON_LABEL]: "1" },
     // The agent reads its limits with env: on runc, nproc, free and df show the whole machine.
     Env: [
       `PARPAING_MEMORY_MB=${limits.memory}`,
@@ -135,7 +155,7 @@ export async function create({
       await container.remove({ force: true, v: true });
       throw error.statusCode === 400 ? imageError(image, error) : error;
     });
-    return { id: shortId(container.id), state: stateOf(true), runtime, network, ...limits };
+    return { id: shortId(container.id), state: stateOf(true), runtime, network, ...limits, labels };
   } catch (error) {
     if (net) await removeNetwork(net.name);
     throw error;
@@ -160,9 +180,12 @@ export async function info() {
   };
 }
 
-export async function list() {
+// label: key or key=value filters, all to match.
+export async function list({ label = [] }: { label?: string | string[] } = {}) {
   const containers = await docker.listContainers({ all: true, filters: { label: [LABEL] } });
-  return containers.map((container) => ({ id: shortId(container.Id), state: stateOf(container.State === "running") }));
+  return containers
+    .map((container) => ({ id: shortId(container.Id), state: stateOf(container.State === "running"), labels: labelsOf(container.Labels) }))
+    .filter((sandbox) => [label].flat().every((filter) => matches(sandbox.labels, filter)));
 }
 
 // The sandbox's container, or nothing: a container without the label is not a sandbox.
@@ -198,6 +221,7 @@ export async function get(id: string) {
     cpus: or((host.NanoCpus ?? 0) / 1e9),
     processes: or(host.PidsLimit),
     disk: or(Number(config.Labels?.[DISK_LABEL])),
+    labels: labelsOf(config.Labels),
   };
 }
 

@@ -69,6 +69,7 @@ PARPAING_ADDRESS=0.0.0.0 PARPAING_API_KEY=<key> PARPAING_HOSTS=<server IP or dom
 | Limits | `POST /sandboxes` + `memory`, `cpus`, `processes`, `disk`, `wait` | Ceilings per sandbox, readable inside with `env`. Disk: enforced on gVisor only | 🟢 Done |
 | Network | `POST /sandboxes` + `network` | `internet` through the egress proxy (HTTP, HTTPS, SOCKS5, ssh), or `none` | 🟢 Done |
 | Engine | `POST /sandboxes` + `runtime` | `runc` or `runsc` (gVisor), `PARPAING_RUNTIME` for the default | 🟢 Done |
+| Labels | `POST /sandboxes` + `labels`<br>`GET /sandboxes?label=key=value` | Key-value pairs fixed at creation, to find your sandboxes again. The list keeps the sandboxes that carry every `label` asked. Not a protection: the API key opens every sandbox | 🟢 Done |
 
 See the details in [ROADMAP.md](ROADMAP.md).
 
