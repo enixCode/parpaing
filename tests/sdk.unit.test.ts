@@ -1,4 +1,4 @@
-// SDK unit tests: the output reading of sdk/index.ts against a fake fetch, no running parpaing needed.
+// SDK unit tests: the output reading and the list of sdk/index.ts against a fake fetch, no running parpaing needed.
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 import { Parpaing, ParpaingError } from "../sdk/index.ts";
@@ -9,7 +9,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-// Replaces fetch: a POST starts command c1, each GET of the output takes the next answer of `outputs`. Returns the URLs asked.
+// Replaces fetch: a POST starts command c1, each GET takes the next answer of `outputs`. Returns the URLs asked.
 const fake = (outputs: (() => Response)[]) => {
   const calls: string[] = [];
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
@@ -36,6 +36,21 @@ const ndjson = (items: Iterable<object>, onCancel?: () => void) => {
   });
   return new Response(body);
 };
+
+describe("sdk list", () => {
+  test("list sends one label filter per entry, none without labels", async () => {
+    const calls = fake([() => Response.json([]), () => Response.json([])]);
+    await parpaing.list({ user: "alice", role: "dev" });
+    await parpaing.list();
+    assert.deepEqual(calls, ["GET http://127.0.0.1:8090/sandboxes?label=user%3Dalice&label=role%3Ddev", "GET http://127.0.0.1:8090/sandboxes"]);
+  });
+
+  test("list keeps only the sandboxes carrying the labels, even from a parpaing that ignores the filter", async () => {
+    const answer = [{ id: "a", state: "running", labels: { user: "alice" } }, { id: "b", state: "running", labels: { user: "bob" } }, { id: "c", state: "running" }];
+    fake([() => Response.json(answer)]);
+    assert.deepEqual((await parpaing.list({ user: "alice" })).map((sandbox) => sandbox.id), ["a"]);
+  });
+});
 
 describe("sdk output reading", () => {
   test("an error thrown by onOutput reaches the caller as it is, not retried", async () => {

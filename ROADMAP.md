@@ -41,7 +41,7 @@ Which engine supports what: [docs/runtimes.md](docs/runtimes.md).
 | 23 | Stop a command | By its id, with everything it started: SIGTERM, SIGKILL 10 s later | 2.0.0 | 🟢 Done |
 | 24 | Output caps | The last 50 finished commands kept; per command, at least the last 50 MiB of output, at most about 100 MiB: a read from before it starts with a `{skipped, next}` line | 2.0.0 | 🟢 Done |
 | | **🚀 Release 2.0.0** | Commands are a resource: started, read and stopped by id | 2.0.0 | 🟢 Done |
-| 25 | Labels | Key-value pairs on a sandbox, and filter the list by label | 2.x | ⚪ Planned |
+| 25 | Labels | Key-value pairs fixed at creation (`labels`), and filter the list with `GET /sandboxes?label=key=value` | 2.x | 🟢 Done |
 | 26 | Time to live | Removed after a set time, fixed at creation | 2.x | ⚪ Planned |
 | 27 | Stop and start | Pause a sandbox, keep its files | 2.x | ⚪ Planned |
 | 28 | Idle stop | Paused after some time without activity | 2.x | ⚪ Planned |

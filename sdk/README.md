@@ -37,9 +37,9 @@ await parpaing.delete(id);
 | Method | Route | Returns |
 |---|---|---|
 | `info()` | `GET /info` | Version, engines, capacity, sandbox count |
-| `create(options?)` | `POST /sandboxes` | The sandbox and its limits |
-| `list()` | `GET /sandboxes` | `[{ id, state }]` |
-| `get(id)` | `GET /sandboxes/:id` | The sandbox and its limits |
+| `create(options?)` | `POST /sandboxes` | The sandbox, its limits and its labels (`options.labels`) |
+| `list(labels?)` | `GET /sandboxes?label=key=value` | `[{ id, state, labels }]`, only those carrying every label given |
+| `get(id)` | `GET /sandboxes/:id` | The sandbox, its limits and its labels |
 | `delete(id)` | `DELETE /sandboxes/:id` | |
 | `exec(id, cmd)` | `start`, then `output` with `follow` to the end | `{ exitCode, stdout, stderr, skipped? }` |
 | `exec(id, cmd, { onOutput })` | the same | `{ exitCode, skipped? }`, the output live |

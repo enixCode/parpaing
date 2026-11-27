@@ -21,6 +21,8 @@ export interface NewSandbox {
   disk?: number;
   /** Seconds to wait if the machine lacks free memory, 0 by default. */
   wait?: number;
+  /** Up to 32 key-value pairs to find the sandbox by with `list()`, such as `{ user: "alice" }`. Fixed at creation. */
+  labels?: Record<string, string>;
 }
 
 export interface Sandbox {
@@ -32,6 +34,7 @@ export interface Sandbox {
   cpus: number | null;
   processes: number | null;
   disk: number | null;
+  labels: Record<string, string>;
 }
 
 export interface CommandResult {
@@ -145,8 +148,12 @@ export class Parpaing {
     return (await this.#call("POST", "/sandboxes", { json: options })).json();
   }
 
-  async list(): Promise<{ id: string; state: State }[]> {
-    return (await this.#call("GET", "/sandboxes")).json();
+  /** Every sandbox, or with `labels` only those carrying all of them. */
+  async list(labels: Record<string, string> = {}): Promise<{ id: string; state: State; labels: Record<string, string> }[]> {
+    const query = new URLSearchParams(Object.entries(labels).map(([key, value]) => ["label", `${key}=${value}`])).toString();
+    const sandboxes: { id: string; state: State; labels: Record<string, string> }[] = await (await this.#call("GET", `/sandboxes${query && `?${query}`}`)).json();
+    // Checked here too: a parpaing older than labels ignores the filter and answers every sandbox.
+    return sandboxes.filter((sandbox) => Object.entries(labels).every(([key, value]) => sandbox.labels?.[key] === value));
   }
 
   async get(id: string): Promise<Sandbox> {

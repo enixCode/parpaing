@@ -153,6 +153,69 @@ describe("sandboxes", () => {
   });
 });
 
+describe("labels", () => {
+  const LABELS_HELP =
+    'labels: up to 32 key-value pairs, keys of 63 characters at most (letters, digits, ".", "_" or "-", starting with a letter or digit), values of 256 characters at most, for example {"user": "alice"}';
+  // A value unique to this run: no other sandbox on this machine carries it.
+  const run = `run-${Math.random().toString(36).slice(2)}`;
+  const ids = (res: { data: { id: string }[] }) => res.data.map((sandbox) => sandbox.id).sort();
+  const make = async (labels?: Record<string, string>) => {
+    const res = await api("POST", "/sandboxes", labels ? { labels } : {});
+    assert.equal(res.status, 201);
+    created.push(res.data.id);
+    return res.data;
+  };
+
+  test("labels come back on create, read and list, filters on key=value, key, and both", async () => {
+    const labels = { "test.run": run, user: "alice", note: "a=b" };
+    const alice = await make(labels);
+    assert.deepEqual(alice.labels, labels);
+    assert.deepEqual((await api("GET", `/sandboxes/${alice.id}`)).data.labels, labels);
+    const bob = await make({ "test.run": run, user: "bob" });
+
+    const all = await api("GET", "/sandboxes");
+    assert.deepEqual(all.data.find((sandbox: { id: string }) => sandbox.id === alice.id).labels, labels);
+    assert.deepEqual(ids(await api("GET", `/sandboxes?label=test.run=${run}`)), [alice.id, bob.id].sort());
+    assert.deepEqual(ids(await api("GET", `/sandboxes?label=test.run=${run}&label=user=alice`)), [alice.id]);
+    assert.deepEqual(ids(await api("GET", `/sandboxes?label=test.run=${run}&label=note`)), [alice.id]);
+    assert.deepEqual(ids(await api("GET", `/sandboxes?label=test.run=${run}&label=note=a%3Db`)), [alice.id]);
+    assert.deepEqual(ids(await api("GET", `/sandboxes?label=test.run=${run}&label=user=carol`)), []);
+  });
+
+  test("a sandbox without labels has labels {}", async () => {
+    const plain = await make();
+    assert.deepEqual(plain.labels, {});
+    assert.deepEqual((await api("GET", `/sandboxes/${plain.id}`)).data.labels, {});
+    assert.deepEqual((await api("GET", "/sandboxes")).data.find((sandbox: { id: string }) => sandbox.id === plain.id).labels, {});
+  });
+
+  test("refuses bad labels with the label help", async () => {
+    const many = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, ""]));
+    for (const labels of [{ "-bad": "x" }, { "a b": "x" }, { ["k".repeat(64)]: "x" }, { user: 3 }, { user: "x".repeat(257) }, many, ["user"], "user"]) {
+      const res = await api("POST", "/sandboxes", { labels });
+      if (res.status === 201) created.push(res.data.id);
+      assert.equal(res.status, 400, JSON.stringify(labels));
+      assert.equal(res.data.error, LABELS_HELP);
+    }
+  });
+
+  test("labels at the limits are kept: 32 pairs, a 63-character key, a 256-character value", async () => {
+    const labels = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`, ""]));
+    Object.assign(labels, { ["k".repeat(63)]: "x", "test.run": "v".repeat(256 - run.length) + run });
+    const sandbox = await make(labels);
+    assert.deepEqual(sandbox.labels, labels);
+    assert.deepEqual((await api("GET", `/sandboxes/${sandbox.id}`)).data.labels, labels);
+  });
+
+  test("refuses a bad label filter with the label help", async () => {
+    for (const query of ["label=", "label=-bad", "label=a%20b=x", "label=user&label==x"]) {
+      const res = await api("GET", `/sandboxes?${query}`);
+      assert.equal(res.status, 400, query);
+      assert.equal(res.data.error, "label: a key or key=value, repeatable, for example label=user=alice");
+    }
+  });
+});
+
 describe("daemon", () => {
   test("is PID 1, and runs images without a shell or sleep", async () => {
     const id = await newSandbox();
@@ -231,7 +294,7 @@ describe("limits", () => {
     assert.equal(res.status, 201);
     const { id } = res.data;
     created.push(id);
-    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", runtime: RUNTIME, network: "internet", memory: 256, cpus: 0.5, processes: 100, disk: 2048 });
+    assert.deepEqual((await api("GET", `/sandboxes/${id}`)).data, { id, state: "running", runtime: RUNTIME, network: "internet", memory: 256, cpus: 0.5, processes: 100, disk: 2048, labels: {} });
     const env = await exec(id, ["sh", "-c", "env | grep -E '^PARPAING_(CPUS|DISK_MB|MEMORY_MB|PROCESSES)=' | sort"]);
     assert.deepEqual(stdout(env.text).trim().split("\n"), [
       "PARPAING_CPUS=0.5",

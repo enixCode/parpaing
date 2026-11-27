@@ -15,6 +15,7 @@ Each sandbox runs with an engine (an OCI runtime), chosen with `runtime` or `PAR
 | Feature | runc | runsc | Kata | To check |
 |---|---|---|---|---|
 | Create, list, read, remove | ✅ | ✅ | ❓ | |
+| Labels | ✅ | ❓ | ❓ | Docker labels on the container, outside the engine: expected the same everywhere |
 | Any image | ✅ | ✅ | ❓ | Docker pulls the image before the engine starts: expected the same everywhere |
 | Run a command | ✅ | ✅ | ❓ | |
 | Hardening (9 capabilities) | ✅ | ✅ | ❓ | runsc: the same 9 capabilities (`0x200004fb`), apt and ping work |
